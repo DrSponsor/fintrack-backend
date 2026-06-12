@@ -6,8 +6,8 @@ const baseEnv = {
   HOST: '127.0.0.1',
   PORT: '3000',
   LOG_LEVEL: 'silent',
-  DATABASE_URL: 'postgresql://postgres.fmxgzqvxuaglxcrpaapd:XW3WfBap3eH8iw30@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?pgbouncer=true',
-  DIRECT_URL: 'postgresql://postgres.fmxgzqvxuaglxcrpaapd:XW3WfBap3eH8iw30@aws-0-eu-west-1.pooler.supabase.com:5432/postgres',
+  DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/fintrack?pgbouncer=true',
+  DIRECT_URL: 'postgresql://postgres:postgres@localhost:5432/fintrack',
   REDIS_URL: 'redis://localhost:6379',
   FIELD_ENCRYPTION_KEY_BASE64: Buffer.alloc(32).toString('base64'),
 }

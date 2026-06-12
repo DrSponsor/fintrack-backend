@@ -8,7 +8,7 @@ export type GuardrailViolation = {
 }
 
 const scannedExtensions = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs'])
-const ignoredSegments = new Set(['node_modules', 'dist', 'coverage', '.git'])
+const ignoredSegments = new Set(['node_modules', 'dist', 'coverage', '.git', 'generated'])
 const moneyFields = [
   'amountKobo',
   'balanceKobo',
