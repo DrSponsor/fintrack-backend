@@ -4,9 +4,11 @@ import type { CacheManager } from '../core/cache/cache-manager'
 import type { IEventBus } from '../core/events/event-bus.interface'
 import type { QueueRegistry } from '../core/queue/queues'
 import type { AuthenticatedUser } from './auth'
+import type { AppConfig } from '../config'
 
 declare module 'fastify' {
   interface FastifyInstance {
+    appConfig: AppConfig
     db: {
       readonly primary: PrismaClient
       readonly read: PrismaClient
@@ -20,7 +22,7 @@ declare module 'fastify' {
   interface FastifyRequest {
     requestId: string
     user?: AuthenticatedUser
-    rawBody?: Buffer
+    rawBody?: string
     idempotency?: {
       readonly key: string
       readonly cacheKey: string

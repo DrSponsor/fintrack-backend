@@ -24,6 +24,7 @@ export class FakeRedis {
   public status: string = 'wait'
   private readonly values = new Map<string, string>()
   private readonly counters = new Map<string, number>()
+  private readonly sets = new Map<string, Set<string>>()
 
   public connect(): Promise<void> {
     this.status = 'ready'
@@ -69,6 +70,52 @@ export class FakeRedis {
     const existed = this.values.delete(key)
     return Promise.resolve(existed ? 1 : 0)
   }
+
+  public exists(key: string): Promise<number> {
+    return Promise.resolve(this.values.has(key) ? 1 : 0)
+  }
+
+  public sadd(key: string, ...members: readonly string[]): Promise<number> {
+    let set = this.sets.get(key)
+    if (set === undefined) {
+      set = new Set()
+      this.sets.set(key, set)
+    }
+    let added = 0
+    for (const member of members) {
+      if (!set.has(member)) {
+        set.add(member)
+        added++
+      }
+    }
+    return Promise.resolve(added)
+  }
+
+  public srem(key: string, ...members: readonly string[]): Promise<number> {
+    const set = this.sets.get(key)
+    if (set === undefined) {
+      return Promise.resolve(0)
+    }
+    let removed = 0
+    for (const member of members) {
+      if (set.delete(member)) {
+        removed++
+      }
+    }
+    return Promise.resolve(removed)
+  }
+
+  public smembers(key: string): Promise<readonly string[]> {
+    const set = this.sets.get(key)
+    if (set === undefined) {
+      return Promise.resolve([])
+    }
+    return Promise.resolve(Array.from(set))
+  }
+
+  public ttl(_key: string): Promise<number> {
+    return Promise.resolve(3600)
+  }
 }
 
 function createPrismaClientStub(): PrismaClient {
@@ -77,6 +124,9 @@ function createPrismaClientStub(): PrismaClient {
     $disconnect: (): Promise<void> => Promise.resolve(),
     auditLog: {
       create: (): Promise<unknown> => Promise.resolve({ id: 'audit' }),
+    },
+    subscription: {
+      findUnique: (): Promise<unknown> => Promise.resolve(null),
     },
   }
 

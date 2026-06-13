@@ -14,7 +14,10 @@ import { rateLimitPlugin } from './core/plugins/03-rate-limit'
 import { databasePlugin } from './core/plugins/04-database'
 import { redisPlugin } from './core/plugins/05-redis'
 import { cachePlugin } from './core/plugins/06-cache'
-import { authPlugin } from './core/plugins/07-auth'
+import { authPlugin as jwtAuthPlugin } from './core/plugins/07-auth'
+import { authPlugin as authModulePlugin } from './modules/auth/auth.module'
+import { usersPlugin } from './modules/users/users.module'
+import { accountsPlugin } from './modules/accounts/accounts.module'
 import { idempotencyPlugin } from './core/plugins/08-idempotency'
 import { auditPlugin } from './core/plugins/09-audit'
 import { errorHandlerPlugin } from './core/plugins/10-error-handler'
@@ -58,6 +61,10 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
     done()
   })
 
+  // Make config available to all modules via Fastify's DI chain.
+  // Modules access it as fastify.appConfig — never process.env directly.
+  fastify.decorate('appConfig', appConfig)
+
   await fastify.register(requestIdPlugin)
   await fastify.register(securityPlugin, { appConfig })
   await fastify.register(rateLimitPlugin)
@@ -74,11 +81,17 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
     ...(options.eventBus ? { eventBus: options.eventBus } : {}),
     ...(options.queues ? { queues: options.queues } : {}),
   })
-  await fastify.register(authPlugin, { appConfig })
+  await fastify.register(jwtAuthPlugin, { appConfig })
   await fastify.register(idempotencyPlugin)
   await fastify.register(auditPlugin)
   await fastify.register(errorHandlerPlugin)
 
+  // ── Module registration ──────────────────────────────────────
+  await fastify.register(authModulePlugin)
+  await fastify.register(usersPlugin)
+  await fastify.register(accountsPlugin)
+
+  // ── Infrastructure routes ───────────────────────────────────
   registerHealthRoutes(fastify, options.healthChecks)
   registerMetricsRoute(fastify)
 
