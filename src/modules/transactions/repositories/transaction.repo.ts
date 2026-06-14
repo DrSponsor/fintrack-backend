@@ -26,7 +26,8 @@ export type CreateTransactionData = {
   readonly transactionDate: Date
   readonly source: 'EMAIL' | 'MANUAL' | 'SMS' | 'MONO'
   readonly idempotencyKey: string
-  readonly balanceAfterKobo?: bigint
+  readonly balanceAfterKobo?: bigint | undefined
+  readonly isVerified?: boolean
 }
 
 export type ListTransactionsFilter = {
@@ -157,6 +158,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
           transactionDate: data.transactionDate,
           source: data.source as CaptureSource,
           idempotencyKey: data.idempotencyKey,
+          isVerified: data.isVerified ?? false,
         },
         select: SELECT_FIELDS,
       }),
