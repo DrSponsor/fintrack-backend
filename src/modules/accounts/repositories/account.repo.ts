@@ -42,6 +42,9 @@ export interface IAccountRepository {
   update(id: string, data: UpdateAccountData): Promise<AccountRecord>
   delete(id: string): Promise<void>
   countByUserId(userId: string): Promise<number>
+  updateGmailToken(id: string, gmailTokenEnc: string | null, gmailConnected: boolean): Promise<AccountRecord>
+  getGmailToken(id: string): Promise<string | null>
+  findConnectedGmailAccounts(): Promise<readonly AccountRecord[]>
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -150,5 +153,36 @@ export class PrismaAccountRepository implements IAccountRepository {
 
   public async countByUserId(userId: string): Promise<number> {
     return this.prisma.account.count({ where: { userId } })
+  }
+
+  public async updateGmailToken(id: string, gmailTokenEnc: string | null, gmailConnected: boolean): Promise<AccountRecord> {
+    const row = await this.prisma.account.update({
+      where: { id },
+      data: {
+        gmailTokenEnc,
+        gmailConnected,
+      },
+      select: SELECT_FIELDS,
+    })
+
+    return toDomain(row as unknown as PrismaAccountRow)
+  }
+
+  public async getGmailToken(id: string): Promise<string | null> {
+    const row = await this.prisma.account.findUnique({
+      where: { id },
+      select: { gmailTokenEnc: true },
+    })
+
+    return row?.gmailTokenEnc ?? null
+  }
+
+  public async findConnectedGmailAccounts(): Promise<readonly AccountRecord[]> {
+    const rows = await this.prisma.account.findMany({
+      where: { gmailConnected: true },
+      select: SELECT_FIELDS,
+    })
+
+    return rows.map((row) => toDomain(row as unknown as PrismaAccountRow))
   }
 }
