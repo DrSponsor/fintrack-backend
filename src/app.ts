@@ -18,6 +18,9 @@ import { authPlugin as jwtAuthPlugin } from './core/plugins/07-auth'
 import { authPlugin as authModulePlugin } from './modules/auth/auth.module'
 import { usersPlugin } from './modules/users/users.module'
 import { accountsPlugin } from './modules/accounts/accounts.module'
+import { categoriesPlugin } from './modules/categories/categories.module'
+import { transactionsPlugin } from './modules/transactions/transactions.module'
+import { capturePlugin } from './modules/capture/capture.module'
 import { idempotencyPlugin } from './core/plugins/08-idempotency'
 import { auditPlugin } from './core/plugins/09-audit'
 import { errorHandlerPlugin } from './core/plugins/10-error-handler'
@@ -90,6 +93,9 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
   await fastify.register(authModulePlugin)
   await fastify.register(usersPlugin)
   await fastify.register(accountsPlugin)
+  await fastify.register(categoriesPlugin)
+  await fastify.register(transactionsPlugin)
+  await fastify.register(capturePlugin)
 
   // ── Infrastructure routes ───────────────────────────────────
   registerHealthRoutes(fastify, options.healthChecks)
