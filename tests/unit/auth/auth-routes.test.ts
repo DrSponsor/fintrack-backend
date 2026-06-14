@@ -35,6 +35,12 @@ function createAuthPrismaStub(): PrismaClient {
     subscription: {
       findUnique: (): Promise<unknown> => Promise.resolve(null),
     },
+    category: {
+      findMany: (): Promise<readonly { readonly id: string; readonly name: string }[]> =>
+        Promise.resolve([{ id: 'uncategorised-id', name: 'uncategorised' }]),
+      findUnique: (): Promise<unknown> =>
+        Promise.resolve({ id: 'uncategorised-id', name: 'uncategorised', icon: 'circle-help' }),
+    },
     user: {
       create: ({ data }: { data: { email: string; passwordHash: string } }): Promise<unknown> => {
         // Check unique constraint

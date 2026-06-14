@@ -32,6 +32,7 @@ const envSchema = z.object({
   FIELD_ENCRYPTION_KEY_BASE64: z.string().min(1),
   JWT_PUBLIC_KEY_PEM: z.string().optional().or(z.literal('')),
   JWT_PRIVATE_KEY_PEM: z.string().optional().or(z.literal('')),
+  DEEPSEEK_API_KEY: z.string().optional().or(z.literal('')),
 }).superRefine((value, context) => {
   const key = Buffer.from(value.FIELD_ENCRYPTION_KEY_BASE64, 'base64')
   if (key.byteLength !== 32) {
@@ -73,6 +74,7 @@ export type AppConfig = {
   readonly fieldEncryptionKeyBase64: string
   readonly jwtPublicKeyPem?: string
   readonly jwtPrivateKeyPem?: string
+  readonly deepseekApiKey?: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -94,5 +96,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     fieldEncryptionKeyBase64: parsed.FIELD_ENCRYPTION_KEY_BASE64,
     ...(parsed.JWT_PUBLIC_KEY_PEM ? { jwtPublicKeyPem: parsed.JWT_PUBLIC_KEY_PEM } : {}),
     ...(parsed.JWT_PRIVATE_KEY_PEM ? { jwtPrivateKeyPem: parsed.JWT_PRIVATE_KEY_PEM } : {}),
+    ...(parsed.DEEPSEEK_API_KEY ? { deepseekApiKey: parsed.DEEPSEEK_API_KEY } : {}),
   }
 }

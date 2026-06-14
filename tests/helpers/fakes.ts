@@ -128,6 +128,12 @@ function createPrismaClientStub(): PrismaClient {
     subscription: {
       findUnique: (): Promise<unknown> => Promise.resolve(null),
     },
+    category: {
+      findMany: (): Promise<readonly { readonly id: string; readonly name: string }[]> =>
+        Promise.resolve([{ id: 'uncategorised-id', name: 'uncategorised' }]),
+      findUnique: (): Promise<unknown> =>
+        Promise.resolve({ id: 'uncategorised-id', name: 'uncategorised', icon: 'circle-help' }),
+    },
   }
 
   return client as unknown as PrismaClient

@@ -1,39 +1,68 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '../src/generated/prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+import { Pool } from 'pg'
+import 'dotenv/config'
 
-const prisma = new PrismaClient()
+const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL
+if (!connectionString) {
+  throw new Error('DIRECT_URL or DATABASE_URL environment variable is required for seeding')
+}
+const pool = new Pool({ connectionString })
+const adapter = new PrismaPg(pool)
+const prisma = new PrismaClient({ adapter })
 
 const categories = [
   { name: 'uncategorised', icon: 'circle-help' },
-  { name: 'food', icon: 'utensils' },
+  { name: 'food-groceries', icon: 'utensils' },
   { name: 'transport', icon: 'bus' },
-  { name: 'utilities', icon: 'lightbulb' },
   { name: 'airtime-data', icon: 'smartphone' },
-  { name: 'rent', icon: 'home' },
-  { name: 'salary', icon: 'briefcase-business' },
-  { name: 'shopping', icon: 'shopping-bag' },
+  { name: 'utilities', icon: 'lightbulb' },
+  { name: 'entertainment', icon: 'ticket' },
   { name: 'health', icon: 'heart-pulse' },
   { name: 'education', icon: 'graduation-cap' },
-  { name: 'entertainment', icon: 'ticket' },
+  { name: 'shopping', icon: 'shopping-bag' },
+  { name: 'transfers', icon: 'arrow-left-right' },
+  { name: 'subscriptions', icon: 'calendar-repeat' },
+  { name: 'rent', icon: 'home' },
+  { name: 'salary', icon: 'briefcase-business' },
   { name: 'fees-charges', icon: 'receipt' },
+  { name: 'investments', icon: 'trending-up' },
+  { name: 'business', icon: 'store' },
 ] as const
 
-const keywords = {
-  food: ['restaurant', 'food', 'chicken', 'pizza', 'eatery'],
-  transport: ['uber', 'bolt', 'transport', 'fuel', 'bus'],
-  utilities: ['electricity', 'power', 'water', 'utility'],
-  'airtime-data': ['airtime', 'data', 'mtn', 'glo', 'airtel', '9mobile'],
-  rent: ['rent', 'landlord', 'housing'],
-  salary: ['salary', 'payroll', 'wage'],
-  shopping: ['market', 'store', 'mall', 'shop'],
-  health: ['hospital', 'pharmacy', 'clinic'],
-  education: ['school', 'tuition', 'course'],
-  entertainment: ['cinema', 'netflix', 'spotify'],
-  'fees-charges': ['charge', 'fee', 'vat'],
-} as const
+const keywords: Record<string, readonly string[]> = {
+  'food-groceries': ['restaurant', 'food', 'chicken', 'pizza', 'eatery', 'groceries', 'supermarket', 'chow', 'spaghetti', 'burger', 'bakery', 'bukka', 'buka', 'kitchen', 'canteen'],
+  transport: ['uber', 'bolt', 'transport', 'fuel', 'bus', 'ride', 'cab', 'airline', 'flight', 'petrol', 'diesel', 'filling station', 'railway', 'logistics'],
+  'airtime-data': ['airtime', 'data', 'mtn', 'glo', 'airtel', '9mobile', 'spectranet', 'smile', 'recharge', 'credit purchase'],
+  utilities: ['electricity', 'power', 'water', 'utility', 'ekedc', 'ikedc', 'aedc', 'ibedc', 'kedco', 'waste', 'sewage'],
+  entertainment: ['cinema', 'netflix', 'spotify', 'showmax', 'dstv', 'gotv', 'betting', 'bet9ja', 'sportybet', 'club', 'bar', 'lounge', 'concert', 'event', 'pub', 'gaming', 'casino'],
+  health: ['hospital', 'pharmacy', 'clinic', 'medical', 'drug', 'dentist', 'health', 'fitness', 'gym', 'spa', 'eyecare', 'optician'],
+  education: ['school', 'tuition', 'course', 'exam', 'waec', 'jamb', 'book', 'library', 'academy', 'varsity', 'university', 'college', 'seminar'],
+  shopping: ['market', 'store', 'mall', 'shop', 'jumia', 'konga', 'amazon', 'boutique', 'fashion', 'clothing', 'electronics', 'superstore'],
+  transfers: ['transfer', 'send', 'wire', 'deposit', 'withdrawal', 'p2p', 'cashout', 'funding'],
+  subscriptions: ['subscription', 'sub', 'membership', 'cloud', 'aws', 'google', 'apple', 'adobe', 'zoom', 'github', 'azure', 'patreon', 'subscribestar'],
+  rent: ['rent', 'landlord', 'housing', 'apartment', 'estate', 'leasing', 'tenant'],
+  salary: ['salary', 'payroll', 'wage', 'allowance', 'bonus', 'commission', 'stipend'],
+  'fees-charges': ['charge', 'fee', 'vat', 'tax', 'maintenance', 'stamp duty', 'sms charge', 'commission on turnover', 'cot'],
+  investments: ['invest', 'mutual fund', 'stock', 'bond', 'savings', 'piggyvest', 'cowrywise', 'bamboo', 'chaka', 'treasury bill', 'crypto', 'binance'],
+  business: ['business', 'merchant', 'vendor', 'invoice', 'supplier', 'trade', 'wholesaler', 'retailer'],
+}
+
+const parserPatterns = [
+  { senderDomain: 'gtbank.com', bankName: 'Guaranty Trust Bank' },
+  { senderDomain: 'accessbankplc.com', bankName: 'Access Bank' },
+  { senderDomain: 'zenithbank.com', bankName: 'Zenith Bank' },
+  { senderDomain: 'ubagroup.com', bankName: 'United Bank for Africa' },
+  { senderDomain: 'firstbanknigeria.com', bankName: 'First Bank of Nigeria' },
+  { senderDomain: 'kudabank.com', bankName: 'Kuda Bank' },
+  { senderDomain: 'opay-nigeria.com', bankName: 'OPay' },
+  { senderDomain: 'moniepoint.com', bankName: 'Moniepoint' },
+] as const
 
 async function seed(): Promise<void> {
   const categoryRecords = new Map<string, { id: string }>()
 
+  // 1. Seed categories
   for (const category of categories) {
     const record = await prisma.category.upsert({
       where: { name: category.name },
@@ -44,6 +73,7 @@ async function seed(): Promise<void> {
     categoryRecords.set(category.name, record)
   }
 
+  // 2. Seed category keywords
   for (const [categoryName, categoryKeywords] of Object.entries(keywords)) {
     const category = categoryRecords.get(categoryName)
     if (category === undefined) {
@@ -66,6 +96,24 @@ async function seed(): Promise<void> {
       })
     }
   }
+
+  // 3. Seed ParserPattern stubs
+  for (const pattern of parserPatterns) {
+    await prisma.parserPattern.upsert({
+      where: { senderDomain: pattern.senderDomain },
+      create: {
+        senderDomain: pattern.senderDomain,
+        bankName: pattern.bankName,
+        status: 'STABLE',
+        patterns: {},
+        aiGenerated: false,
+        lastValidated: new Date(),
+      },
+      update: {
+        bankName: pattern.bankName,
+      },
+    })
+  }
 }
 
 void seed()
@@ -75,4 +123,5 @@ void seed()
   })
   .finally(async () => {
     await prisma.$disconnect()
+    await pool.end()
   })
