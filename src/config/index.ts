@@ -33,6 +33,10 @@ const envSchema = z.object({
   JWT_PUBLIC_KEY_PEM: z.string().optional().or(z.literal('')),
   JWT_PRIVATE_KEY_PEM: z.string().optional().or(z.literal('')),
   DEEPSEEK_API_KEY: z.string().optional().or(z.literal('')),
+  GOOGLE_CLIENT_ID: z.string().optional().or(z.literal('')),
+  GOOGLE_CLIENT_SECRET: z.string().optional().or(z.literal('')),
+  GOOGLE_REDIRECT_URI: z.string().optional().or(z.literal('')),
+  GOOGLE_PUB_SUB_TOPIC: z.string().default('projects/fintrack-prod/topics/gmail-push'),
 }).superRefine((value, context) => {
   const key = Buffer.from(value.FIELD_ENCRYPTION_KEY_BASE64, 'base64')
   if (key.byteLength !== 32) {
@@ -58,6 +62,27 @@ const envSchema = z.object({
         message: 'JWT_PRIVATE_KEY_PEM is required in production',
       })
     }
+    if (!value.GOOGLE_CLIENT_ID) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['GOOGLE_CLIENT_ID'],
+        message: 'GOOGLE_CLIENT_ID is required in production',
+      })
+    }
+    if (!value.GOOGLE_CLIENT_SECRET) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['GOOGLE_CLIENT_SECRET'],
+        message: 'GOOGLE_CLIENT_SECRET is required in production',
+      })
+    }
+    if (!value.GOOGLE_REDIRECT_URI) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['GOOGLE_REDIRECT_URI'],
+        message: 'GOOGLE_REDIRECT_URI is required in production',
+      })
+    }
   }
 })
 
@@ -75,6 +100,10 @@ export type AppConfig = {
   readonly jwtPublicKeyPem?: string
   readonly jwtPrivateKeyPem?: string
   readonly deepseekApiKey?: string
+  readonly googleClientId?: string
+  readonly googleClientSecret?: string
+  readonly googleRedirectUri?: string
+  readonly googlePubSubTopic: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -97,5 +126,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(parsed.JWT_PUBLIC_KEY_PEM ? { jwtPublicKeyPem: parsed.JWT_PUBLIC_KEY_PEM } : {}),
     ...(parsed.JWT_PRIVATE_KEY_PEM ? { jwtPrivateKeyPem: parsed.JWT_PRIVATE_KEY_PEM } : {}),
     ...(parsed.DEEPSEEK_API_KEY ? { deepseekApiKey: parsed.DEEPSEEK_API_KEY } : {}),
+    ...(parsed.GOOGLE_CLIENT_ID ? { googleClientId: parsed.GOOGLE_CLIENT_ID } : {}),
+    ...(parsed.GOOGLE_CLIENT_SECRET ? { googleClientSecret: parsed.GOOGLE_CLIENT_SECRET } : {}),
+    ...(parsed.GOOGLE_REDIRECT_URI ? { googleRedirectUri: parsed.GOOGLE_REDIRECT_URI } : {}),
+    googlePubSubTopic: parsed.GOOGLE_PUB_SUB_TOPIC,
   }
 }

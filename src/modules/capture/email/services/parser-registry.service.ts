@@ -1,31 +1,33 @@
 import type { IEmailParser } from '../parsers/parser.interface'
 
-export class ParserRegistryService {
-  private readonly parsers = new Map<string, IEmailParser>()
+export type ParserRegistryServiceDeps = {
+  readonly parsers?: readonly IEmailParser[]
+}
 
-  /**
-   * Registers a parser instance under its supported domains.
-   */
-  public registerParser(parser: IEmailParser): void {
-    for (const domain of parser.supportedDomains) {
-      const normalizedDomain = domain.toLowerCase().trim()
-      this.parsers.set(normalizedDomain, parser)
+export class ParserRegistryService {
+  private readonly parserMap = new Map<string, IEmailParser>()
+
+  public constructor(deps?: ParserRegistryServiceDeps) {
+    if (deps?.parsers) {
+      for (const parser of deps.parsers) {
+        this.registerParser(parser)
+      }
     }
   }
 
-  /**
-   * Retrieves a registered parser for a given sender domain.
-   */
-  public getParserForDomain(domain: string): IEmailParser | null {
-    const normalizedDomain = domain.toLowerCase().trim()
-    return this.parsers.get(normalizedDomain) ?? null
+  public registerParser(parser: IEmailParser): void {
+    for (const domain of parser.supportedDomains) {
+      this.parserMap.set(domain.toLowerCase().trim(), parser)
+    }
   }
 
-  /**
-   * Checks if a parser is registered for a given sender domain.
-   */
+  public getParserForDomain(domain: string): IEmailParser | null {
+    if (!domain) return null
+    return this.parserMap.get(domain.toLowerCase().trim()) ?? null
+  }
+
   public hasParserForDomain(domain: string): boolean {
-    const normalizedDomain = domain.toLowerCase().trim()
-    return this.parsers.has(normalizedDomain)
+    if (!domain) return false
+    return this.parserMap.has(domain.toLowerCase().trim())
   }
 }

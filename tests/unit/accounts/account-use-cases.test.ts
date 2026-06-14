@@ -48,6 +48,9 @@ function createMockAccountRepo(overrides: Partial<IAccountRepository> = {}): IAc
     update: vi.fn().mockResolvedValue(makeAccount()),
     delete: vi.fn().mockResolvedValue(undefined),
     countByUserId: vi.fn().mockResolvedValue(0),
+    updateGmailToken: vi.fn().mockResolvedValue(makeAccount()),
+    getGmailToken: vi.fn().mockResolvedValue(null),
+    findConnectedGmailAccounts: vi.fn().mockResolvedValue([]),
     ...overrides,
   }
 }
