@@ -277,9 +277,7 @@ describe('RefreshUseCase', () => {
       logger: silentLogger,
     })
 
-    const result = await useCase.execute(userId, oldSessionId, {
-      refreshToken: 'old-rt',
-    })
+    const result = await useCase.execute(userId, oldSessionId, 'old-rt')
 
     expect(result.accessToken).toBeTruthy()
     expect(result.refreshToken).toBe('new-rt')
@@ -300,7 +298,7 @@ describe('RefreshUseCase', () => {
     })
 
     try {
-      await useCase.execute(randomUUID(), randomUUID(), { refreshToken: 'stolen-rt' })
+      await useCase.execute(randomUUID(), randomUUID(), 'stolen-rt')
       expect.unreachable('should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(AppError)
@@ -324,7 +322,7 @@ describe('RefreshUseCase', () => {
     })
 
     try {
-      await useCase.execute(randomUUID(), randomUUID(), { refreshToken: 'rt' })
+      await useCase.execute(randomUUID(), randomUUID(), 'rt')
       expect.unreachable('should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(AppError)

@@ -21,6 +21,7 @@ model User {
   reports               Report[]
   subscription          Subscription?
   merchantPreferences   UserMerchantPreference[]
+  billingEvents         BillingEvent[]
 
   @@map("users")
 }
@@ -212,7 +213,7 @@ model Report {
 model AuditLog {
   id           String   @id @default(uuid()) @db.Uuid
   requestId    String   @map("request_id")
-  userId       String   @map("user_id")
+  userId       String   @map("user_id") @db.Uuid
   action       String
   resourceType String   @map("resource_type")
   resourceId   String   @map("resource_id")
@@ -253,12 +254,14 @@ model BillingEvent {
   providerEventId String          @unique @map("provider_event_id")
   eventType       String          @map("event_type")
   normalizedType  String          @map("normalized_type")
-  userId          String?         @map("user_id")
+  userId          String?         @map("user_id") @db.Uuid
   payload         Json
   processed       Boolean         @default(false)
   processedAt     DateTime?       @map("processed_at")
   processingError String?         @map("processing_error")
   createdAt       DateTime        @default(now()) @map("created_at")
+
+  user            User?           @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([processed, createdAt])

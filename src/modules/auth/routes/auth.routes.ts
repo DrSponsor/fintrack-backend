@@ -72,9 +72,18 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
     schema: registerJsonSchema,
     config: {
       audit: { action: 'register', resourceType: 'user' },
+      rateLimit: { max: 20, window: 60 },
     },
   }, async (request, reply) => {
     const result = await registerUseCase.execute(request.body)
+
+    reply.setCookie('refreshToken', result.refreshToken, {
+      path: '/v1/auth',
+      httpOnly: true,
+      secure: fastify.appConfig.nodeEnv === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60,
+    })
 
     return reply.code(201).send(successEnvelope(
       {
@@ -91,9 +100,18 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
     schema: loginJsonSchema,
     config: {
       audit: { action: 'login', resourceType: 'session' },
+      rateLimit: { max: 20, window: 60 },
     },
   }, async (request, reply) => {
     const result = await loginUseCase.execute(request.body)
+
+    reply.setCookie('refreshToken', result.refreshToken, {
+      path: '/v1/auth',
+      httpOnly: true,
+      secure: fastify.appConfig.nodeEnv === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60,
+    })
 
     return reply.code(200).send(successEnvelope(
       {
@@ -113,16 +131,28 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
       throw unauthenticated('Session identifier missing from token')
     }
 
+    const refreshToken = request.cookies.refreshToken
+    if (refreshToken === undefined || refreshToken.length === 0) {
+      throw unauthenticated('Refresh token missing')
+    }
+
     const result = await refreshUseCase.execute(
       request.user.sub,
       request.user.sid,
-      request.body,
+      refreshToken,
     )
+
+    reply.setCookie('refreshToken', result.refreshToken, {
+      path: '/v1/auth',
+      httpOnly: true,
+      secure: fastify.appConfig.nodeEnv === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60,
+    })
 
     return reply.code(200).send(successEnvelope(
       {
         accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
       },
       request.requestId,
@@ -142,6 +172,10 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
     }
 
     await logoutUseCase.execute(request.user.sub, request.user.sid)
+
+    reply.clearCookie('refreshToken', {
+      path: '/v1/auth',
+    })
 
     return reply.code(200).send(successEnvelope(
       { message: 'Logged out successfully' },

@@ -10,6 +10,7 @@ export type Session = {
   readonly sessionId: string
   readonly userId: string
   readonly refreshTokenHash: string
+  readonly lastRefreshTokenHash?: string
   readonly createdAt: string
   readonly expiresAt: string
 }
@@ -95,13 +96,12 @@ export class RedisSessionRepository implements ISessionRepository {
     const now = new Date()
     const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000)
 
-    const sessionData: Session & { readonly consumed: boolean } = {
+    const sessionData: Session = {
       sessionId,
       userId,
       refreshTokenHash,
       createdAt: now.toISOString(),
       expiresAt: expiresAt.toISOString(),
-      consumed: false,
     }
 
     const key = sessionKey(userId, sessionId)
@@ -123,7 +123,7 @@ export class RedisSessionRepository implements ISessionRepository {
       return null
     }
 
-    const session = JSON.parse(raw) as Session & { consumed: boolean }
+    const session = JSON.parse(raw) as Session
 
     // Expiry check (belt and suspenders — Redis TTL is primary)
     if (new Date(session.expiresAt) < new Date()) {
@@ -131,27 +131,18 @@ export class RedisSessionRepository implements ISessionRepository {
       return null
     }
 
-    // Reuse detection: if the token was already consumed, this is a
-    // stolen token being replayed. Revoke ALL sessions immediately.
-    // Architecture: "Stolen refresh token used after legitimate rotation
-    // → ALL sessions for that user immediately revoked."
-    if (session.consumed) {
+    const suppliedHash = sha256Hex(refreshToken)
+
+    // Reuse detection: if the token matches the last used refresh token hash,
+    // this is a stolen token being replayed. Revoke ALL sessions immediately.
+    if (session.lastRefreshTokenHash && suppliedHash === session.lastRefreshTokenHash) {
       await this.revokeAll(userId)
       return null
     }
 
     // Verify the token hash
-    const suppliedHash = sha256Hex(refreshToken)
     if (suppliedHash !== session.refreshTokenHash) {
       return null
-    }
-
-    // Mark as consumed. The next call to `consume` with this token
-    // triggers reuse detection.
-    session.consumed = true
-    const ttl = await this.redis.ttl(key)
-    if (ttl > 0) {
-      await this.redis.set(key, JSON.stringify(session), 'EX', ttl)
     }
 
     return session
@@ -162,14 +153,29 @@ export class RedisSessionRepository implements ISessionRepository {
     sessionId: string,
     oldRefreshToken: string,
   ): Promise<CreateSessionResult | null> {
-    const valid = await this.consume(userId, sessionId, oldRefreshToken)
-    if (valid === null) {
+    const session = await this.consume(userId, sessionId, oldRefreshToken)
+    if (session === null) {
       return null
     }
 
-    // Delete old session, create new one under the same user
-    await this.revoke(userId, sessionId)
-    return this.create(userId)
+    const newRefreshToken = randomBytes(32).toString('hex')
+    const newRefreshTokenHash = sha256Hex(newRefreshToken)
+    const now = new Date()
+    const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000)
+
+    const updatedSession: Session = {
+      sessionId,
+      userId,
+      refreshTokenHash: newRefreshTokenHash,
+      lastRefreshTokenHash: session.refreshTokenHash,
+      createdAt: session.createdAt,
+      expiresAt: expiresAt.toISOString(),
+    }
+
+    const key = sessionKey(userId, sessionId)
+    await this.redis.set(key, JSON.stringify(updatedSession), 'EX', REFRESH_TOKEN_TTL_SECONDS)
+
+    return { sessionId, refreshToken: newRefreshToken }
   }
 
   public async revoke(userId: string, sessionId: string): Promise<void> {

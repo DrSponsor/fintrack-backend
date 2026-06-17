@@ -25,11 +25,6 @@ export const loginBodySchema = z.object({
 
 export type LoginBody = z.infer<typeof loginBodySchema>
 
-export const refreshBodySchema = z.object({
-  refreshToken: z.string().min(1, 'Refresh token is required'),
-})
-
-export type RefreshBody = z.infer<typeof refreshBodySchema>
 
 // ──────────────────────────────────────────────────────────────────
 // JSON Schemas (for Fastify compiled serialiser)
@@ -101,14 +96,6 @@ export const loginJsonSchema = {
 } as const
 
 export const refreshJsonSchema = {
-  body: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['refreshToken'],
-    properties: {
-      refreshToken: { type: 'string', minLength: 1 },
-    },
-  },
   response: {
     200: {
       type: 'object',
@@ -119,10 +106,9 @@ export const refreshJsonSchema = {
         data: {
           type: 'object',
           additionalProperties: false,
-          required: ['accessToken', 'refreshToken', 'expiresIn'],
+          required: ['accessToken', 'expiresIn'],
           properties: {
             accessToken: { type: 'string' },
-            refreshToken: { type: 'string' },
             expiresIn: { type: 'number' },
           },
         },

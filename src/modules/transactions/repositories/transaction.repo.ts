@@ -108,6 +108,11 @@ export class PrismaTransactionRepository implements ITransactionRepository {
   }
 
   public async create(data: CreateTransactionData): Promise<TransactionRecord> {
+    const account = await this.prisma.account.findUniqueOrThrow({
+      where: { id: data.accountId },
+      select: { userId: true },
+    })
+
     const transactionId = randomUUID()
     const eventId = randomUUID()
     const eventTimestamp = new Date()
@@ -179,6 +184,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
           eventType: 'transaction.created',
           payload: {
             transactionId,
+            userId: account.userId,
             accountId: data.accountId,
             amountKobo: data.amountKobo.toString(),
             categoryId: data.categoryId,

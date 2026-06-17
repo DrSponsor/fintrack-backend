@@ -4,7 +4,6 @@ import type { ISessionRepository } from '../repositories/session.repo'
 import { signAccessToken } from '../../../core/crypto/tokens'
 import type { AccessTokenPayload } from '../../../core/crypto/tokens'
 import { unauthenticated, tokenRevoked } from '../../../core/errors/factories'
-import { refreshBodySchema } from '../schemas/auth.schemas'
 
 // ──────────────────────────────────────────────────────────────────
 // Result type
@@ -62,11 +61,8 @@ export class RefreshUseCase {
   public async execute(
     userId: string,
     sessionId: string,
-    rawBody: unknown,
+    refreshToken: string,
   ): Promise<RefreshResult> {
-    const parsed = refreshBodySchema.parse(rawBody)
-    const { refreshToken } = parsed
-
     // Rotate: consume old, issue new. Null = invalid or reuse detected.
     const newSession = await this.sessionRepo.rotate(userId, sessionId, refreshToken)
     if (newSession === null) {

@@ -51,9 +51,6 @@ export async function requireSubscription(
           return
         }
         // Subscription expiry in JWT has passed → fall through to DB check.
-      } else {
-        // JWT says PRO but has no expiry claim → allow (backwards compat).
-        return
       }
     }
     // Tier-change signal exists or subscription expired → fall through to DB check.
