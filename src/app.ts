@@ -9,6 +9,7 @@ import { createLogger } from './core/logger'
 import { successEnvelope } from './core/http/envelope'
 import { httpRequestDurationSeconds, httpRequestsTotal } from './core/observability/metrics'
 import { requestIdPlugin } from './core/plugins/01-request-id'
+import fastifyCookie from '@fastify/cookie'
 import { securityPlugin } from './core/plugins/02-security'
 import { rateLimitPlugin } from './core/plugins/03-rate-limit'
 import { databasePlugin } from './core/plugins/04-database'
@@ -21,6 +22,9 @@ import { accountsPlugin } from './modules/accounts/accounts.module'
 import { categoriesPlugin } from './modules/categories/categories.module'
 import { transactionsPlugin } from './modules/transactions/transactions.module'
 import { capturePlugin } from './modules/capture/capture.module'
+import { budgetsPlugin } from './modules/budgets/budgets.module'
+import { analysisPlugin } from './modules/analysis/analysis.module'
+import { outboxPlugin } from './core/plugins/11-outbox'
 import { idempotencyPlugin } from './core/plugins/08-idempotency'
 import { auditPlugin } from './core/plugins/09-audit'
 import { errorHandlerPlugin } from './core/plugins/10-error-handler'
@@ -69,6 +73,9 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
   fastify.decorate('appConfig', appConfig)
 
   await fastify.register(requestIdPlugin)
+  await fastify.register(fastifyCookie, {
+    secret: appConfig.jwtPrivateKeyPem || 'fintrack-cookie-secret-fallback',
+  })
   await fastify.register(securityPlugin, { appConfig })
   await fastify.register(rateLimitPlugin)
   await fastify.register(databasePlugin, {
@@ -96,6 +103,9 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
   await fastify.register(categoriesPlugin)
   await fastify.register(transactionsPlugin)
   await fastify.register(capturePlugin)
+  await fastify.register(outboxPlugin)
+  await fastify.register(budgetsPlugin)
+  await fastify.register(analysisPlugin)
 
   // ── Infrastructure routes ───────────────────────────────────
   registerHealthRoutes(fastify, options.healthChecks)
