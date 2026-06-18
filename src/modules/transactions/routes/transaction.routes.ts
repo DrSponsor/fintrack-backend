@@ -41,7 +41,10 @@ export function registerTransactionRoutes(fastify: FastifyInstance<any, any, any
       const result = await listTransactionsUseCase.execute(userId, request.query)
 
       const lastItem = result.data[result.data.length - 1]
-      const nextCursor = lastItem !== undefined ? lastItem.id : undefined
+      const nextCursor =
+        lastItem !== undefined
+          ? `${lastItem.id}_${lastItem.transactionDate.toISOString()}`
+          : undefined
 
       return reply.code(200).send(
         successEnvelope(result.data, request.requestId, {

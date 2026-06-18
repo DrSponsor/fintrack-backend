@@ -108,10 +108,18 @@ export class PrismaBudgetRepository implements IBudgetRepository {
     // TOCTOU-safe insert-then-catch is enforced at DB unique constraint level.
     // If double write occurs, unique constraint [transactionId, budgetId] throws.
     try {
+      const tx = await this.prisma.transaction.findFirst({
+        where: { id: transactionId },
+        select: { transactionDate: true },
+      })
+      if (!tx) {
+        throw new Error(`Transaction with id ${transactionId} not found`)
+      }
       await this.prisma.budgetAlert.create({
         data: {
           id: randomUUID(),
           transactionId,
+          transactionDate: tx.transactionDate,
           budgetId,
           userId,
         },

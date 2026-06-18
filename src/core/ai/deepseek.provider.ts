@@ -1,5 +1,6 @@
 import CircuitBreaker from 'opossum'
 import type { IAIProvider, CategorizationResult, ReportSummary } from './ai-provider.interface'
+import { circuitBreakerStateGauge } from '../observability/metrics'
 
 export type DeepSeekProviderDeps = {
   readonly apiKey: string
@@ -24,6 +25,14 @@ export class DeepSeekProvider implements IAIProvider {
         resetTimeout: 30000,
       }
     )
+
+    // Hook circuit breaker state changes to the Prometheus gauge
+    this.breaker.on('open', () => circuitBreakerStateGauge.set({ name: 'deepseek' }, 1))
+    this.breaker.on('close', () => circuitBreakerStateGauge.set({ name: 'deepseek' }, 0))
+    this.breaker.on('halfOpen', () => circuitBreakerStateGauge.set({ name: 'deepseek' }, 2))
+
+    // Set initial state to closed (0)
+    circuitBreakerStateGauge.set({ name: 'deepseek' }, 0)
 
     // Setup action-specific fallback values when the circuit is open or requests fail
     this.breaker.fallback((_err: Error, action: string) => {

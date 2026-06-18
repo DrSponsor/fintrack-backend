@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
 }
 
 
@@ -46,7 +46,7 @@ model Account {
 }
 
 model Transaction {
-  id              String          @id @default(uuid()) @db.Uuid
+  id              String          @default(uuid()) @db.Uuid
   accountId       String          @map("account_id") @db.Uuid
   amountKobo      BigInt          @map("amount_kobo")
   type            TransactionType
@@ -57,7 +57,7 @@ model Transaction {
   parserId        String?         @map("parser_id") @db.Uuid
   rawSnippetEnc   String?         @map("raw_snippet_enc")
   isVerified      Boolean         @default(false) @map("is_verified")
-  idempotencyKey  String          @unique @map("idempotency_key")
+  idempotencyKey  String          @map("idempotency_key")
   createdAt       DateTime        @default(now()) @map("created_at")
 
   account  Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -65,34 +65,38 @@ model Transaction {
   events   TransactionEvent[]
   alerts   BudgetAlert[]
 
+  @@id([id, transactionDate])
+  @@unique([idempotencyKey, transactionDate])
   @@index([accountId, transactionDate])
   @@index([categoryId, transactionDate])
   @@map("transactions")
 }
 
 model TransactionEvent {
-  id            String   @id @default(uuid()) @db.Uuid
-  transactionId String   @map("transaction_id") @db.Uuid
-  type          String
-  payload       Json
-  previousHash  String   @map("previous_hash")
-  hash          String
-  createdAt     DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid()) @db.Uuid
+  transactionId   String   @map("transaction_id") @db.Uuid
+  transactionDate DateTime @map("transaction_date")
+  type            String
+  payload         Json
+  previousHash    String   @map("previous_hash")
+  hash            String
+  createdAt       DateTime @default(now()) @map("created_at")
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId, transactionDate], references: [id, transactionDate], onDelete: Cascade)
 
   @@index([transactionId, createdAt])
   @@map("transaction_events")
 }
 
 model BudgetAlert {
-  id            String   @id @default(uuid()) @db.Uuid
-  transactionId String   @map("transaction_id") @db.Uuid
-  budgetId      String   @map("budget_id") @db.Uuid
-  userId        String   @map("user_id") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid()) @db.Uuid
+  transactionId   String   @map("transaction_id") @db.Uuid
+  transactionDate DateTime @map("transaction_date")
+  budgetId        String   @map("budget_id") @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId, transactionDate], references: [id, transactionDate], onDelete: Cascade)
   budget      Budget      @relation(fields: [budgetId], references: [id], onDelete: Cascade)
 
   @@unique([transactionId, budgetId])

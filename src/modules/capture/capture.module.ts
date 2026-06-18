@@ -17,7 +17,6 @@ import { DeduplicatorService } from '../transactions/services/deduplicator.servi
 import { EmailIngestWorker } from './email/workers/email-ingest.worker'
 import { WatchRenewalWorker } from './email/workers/watch-renewal.worker'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
-import { DeepSeekProvider } from '../../core/ai/deepseek.provider'
 import { WatchService } from './email/services/watch.service'
 import type { AppLogger } from '../../core/logger'
 
@@ -73,10 +72,7 @@ const captureModule: FastifyPluginAsync = async (fastify) => {
   ]
   const parserRegistry = new ParserRegistryService({ parsers })
 
-  const aiProvider = new DeepSeekProvider({
-    apiKey: fastify.appConfig.deepseekApiKey ?? '',
-    categoriesMap,
-  })
+  const aiProvider = fastify.ai
 
   const aiUniversalParser = new AIUniversalParser({
     prisma: fastify.db.primary,
@@ -101,7 +97,7 @@ const captureModule: FastifyPluginAsync = async (fastify) => {
   })
 
   // 4. Instantiate and run workers (skipped in tests to avoid Redis connection attempts)
-  if (fastify.appConfig.nodeEnv !== 'test') {
+  if (fastify.appConfig.nodeEnv !== 'test' && fastify.runWorkers) {
     const emailIngestWorker = new EmailIngestWorker({
       connection,
       concurrency: 5,
@@ -132,6 +128,13 @@ const captureModule: FastifyPluginAsync = async (fastify) => {
       watchService,
       logger,
     })
+
+    // Schedule repeatable cleanup job for raw snippets (runs daily at 02:00 UTC)
+    fastify.queues.captureEmail.add(
+      'cleanup-raw-snippets',
+      {},
+      { repeat: { pattern: '0 2 * * *' } }
+    ).catch((err: unknown) => logger.error({ err }, 'Failed to schedule raw snippet cleanup cron'))
 
     // 5. Ensure graceful shutdown of workers on Fastify close
     fastify.addHook('onClose', async () => {

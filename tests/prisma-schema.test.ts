@@ -17,7 +17,12 @@ describe('Prisma schema foundation laws', () => {
     const modelBlocks = schema.match(/model\s+\w+\s+\{[\s\S]*?\n\}/g) ?? []
     expect(modelBlocks.length).toBeGreaterThan(0)
     for (const block of modelBlocks) {
-      expect(block).toMatch(/id\s+String\s+@id\s+@default\(uuid\(\)\)/)
+      if (block.includes('model Transaction ')) {
+        expect(block).toMatch(/id\s+String\s+@default\(uuid\(\)\)/)
+        expect(block).toMatch(/@@id\(\[id,\s*transactionDate\]\)/)
+      } else {
+        expect(block).toMatch(/id\s+String\s+@id\s+@default\(uuid\(\)\)/)
+      }
     }
   })
 
@@ -30,7 +35,8 @@ describe('Prisma schema foundation laws', () => {
   })
 
   it('contains at-least-once consumer idempotency constraints', () => {
-    expect(schema).toContain('idempotencyKey  String          @unique')
+    expect(schema).toMatch(/idempotencyKey\s+String\s+/)
+    expect(schema).toMatch(/@@unique\(\[idempotencyKey,\s*transactionDate\]\)/)
     expect(schema).toContain('@@unique([transactionId, budgetId])')
     expect(schema).toContain('providerEventId String          @unique')
   })

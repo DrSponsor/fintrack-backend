@@ -6,6 +6,8 @@ import type { QueueRegistry } from '../core/queue/queues'
 import type { AuthenticatedUser } from './auth'
 import type { AppConfig } from '../config'
 
+import type { IAIProvider } from '../core/ai/ai-provider.interface'
+
 declare module 'fastify' {
   interface FastifyInstance {
     appConfig: AppConfig
@@ -17,6 +19,8 @@ declare module 'fastify' {
     cache: CacheManager
     eventBus: IEventBus
     queues: QueueRegistry
+    ai: IAIProvider
+    runWorkers: boolean
   }
 
   interface FastifyRequest {
