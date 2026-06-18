@@ -37,6 +37,9 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional().or(z.literal('')),
   GOOGLE_REDIRECT_URI: z.string().optional().or(z.literal('')),
   GOOGLE_PUB_SUB_TOPIC: z.string().default('projects/fintrack-prod/topics/gmail-push'),
+  PAYSTACK_SECRET_KEY: z.string().optional().or(z.literal('')),
+  PAYSTACK_PLAN_PRO_MONTHLY: z.string().optional().or(z.literal('')),
+  PAYSTACK_PLAN_PRO_ANNUAL: z.string().optional().or(z.literal('')),
 }).superRefine((value, context) => {
   const key = Buffer.from(value.FIELD_ENCRYPTION_KEY_BASE64, 'base64')
   if (key.byteLength !== 32) {
@@ -83,6 +86,27 @@ const envSchema = z.object({
         message: 'GOOGLE_REDIRECT_URI is required in production',
       })
     }
+    if (!value.PAYSTACK_SECRET_KEY) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['PAYSTACK_SECRET_KEY'],
+        message: 'PAYSTACK_SECRET_KEY is required in production',
+      })
+    }
+    if (!value.PAYSTACK_PLAN_PRO_MONTHLY) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['PAYSTACK_PLAN_PRO_MONTHLY'],
+        message: 'PAYSTACK_PLAN_PRO_MONTHLY is required in production',
+      })
+    }
+    if (!value.PAYSTACK_PLAN_PRO_ANNUAL) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['PAYSTACK_PLAN_PRO_ANNUAL'],
+        message: 'PAYSTACK_PLAN_PRO_ANNUAL is required in production',
+      })
+    }
   }
 })
 
@@ -104,6 +128,9 @@ export type AppConfig = {
   readonly googleClientSecret?: string
   readonly googleRedirectUri?: string
   readonly googlePubSubTopic: string
+  readonly paystackSecretKey?: string
+  readonly paystackPlanProMonthly?: string
+  readonly paystackPlanProAnnual?: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -130,5 +157,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(parsed.GOOGLE_CLIENT_SECRET ? { googleClientSecret: parsed.GOOGLE_CLIENT_SECRET } : {}),
     ...(parsed.GOOGLE_REDIRECT_URI ? { googleRedirectUri: parsed.GOOGLE_REDIRECT_URI } : {}),
     googlePubSubTopic: parsed.GOOGLE_PUB_SUB_TOPIC,
+    paystackSecretKey: parsed.PAYSTACK_SECRET_KEY || 'ts_paystack_secret_key_fallback',
+    paystackPlanProMonthly: parsed.PAYSTACK_PLAN_PRO_MONTHLY || 'PLN_test_monthly',
+    paystackPlanProAnnual: parsed.PAYSTACK_PLAN_PRO_ANNUAL || 'PLN_test_annual',
   }
 }

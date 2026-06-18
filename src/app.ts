@@ -25,6 +25,7 @@ import { transactionsPlugin } from './modules/transactions/transactions.module'
 import { capturePlugin } from './modules/capture/capture.module'
 import { budgetsPlugin } from './modules/budgets/budgets.module'
 import { analysisPlugin } from './modules/analysis/analysis.module'
+import { billingPlugin } from './modules/billing/billing.module'
 import { outboxPlugin } from './core/plugins/11-outbox'
 import { idempotencyPlugin } from './core/plugins/08-idempotency'
 import { auditPlugin } from './core/plugins/09-audit'
@@ -110,6 +111,7 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
   await fastify.register(outboxPlugin)
   await fastify.register(budgetsPlugin)
   await fastify.register(analysisPlugin)
+  await fastify.register(billingPlugin)
 
   // ── Infrastructure routes ───────────────────────────────────
   registerHealthRoutes(fastify, options.healthChecks)

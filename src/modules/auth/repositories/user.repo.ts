@@ -27,6 +27,7 @@ export interface IUserRepository {
   create(data: CreateUserData): Promise<UserRecord>
   findByEmail(email: string): Promise<UserRecord | null>
   findById(id: string): Promise<UserRecord | null>
+  updateTier(userId: string, tier: 'FREE' | 'PRO'): Promise<void>
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -115,5 +116,12 @@ export class PrismaUserRepository implements IUserRepository {
       role: 'user',
       createdAt: user.createdAt,
     }
+  }
+
+  public async updateTier(userId: string, tier: 'FREE' | 'PRO'): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { tier },
+    })
   }
 }
