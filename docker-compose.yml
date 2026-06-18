@@ -51,6 +51,47 @@ services:
       timeout: 3s
       retries: 20
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "dist/server.js"]
+    ports:
+      - "3000:3000"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3000
+      - DATABASE_URL=postgresql://fintrack:fintrack@pgbouncer:5432/fintrack?pgbouncer=true
+      - DIRECT_URL=postgresql://fintrack:fintrack@postgres:5432/fintrack
+      - READ_REPLICA_DATABASE_URL=postgresql://fintrack:fintrack@postgres:5432/fintrack
+      - REDIS_URL=redis://redis:6379/0
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "dist/worker.js"]
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - DATABASE_URL=postgresql://fintrack:fintrack@pgbouncer:5432/fintrack?pgbouncer=true
+      - DIRECT_URL=postgresql://fintrack:fintrack@postgres:5432/fintrack
+      - READ_REPLICA_DATABASE_URL=postgresql://fintrack:fintrack@postgres:5432/fintrack
+      - REDIS_URL=redis://redis:6379/0
+
 volumes:
   postgres-data:
   redis-data:

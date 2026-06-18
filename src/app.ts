@@ -14,6 +14,7 @@ import { securityPlugin } from './core/plugins/02-security'
 import { rateLimitPlugin } from './core/plugins/03-rate-limit'
 import { databasePlugin } from './core/plugins/04-database'
 import { redisPlugin } from './core/plugins/05-redis'
+import { aiPlugin } from './core/plugins/05-ai'
 import { cachePlugin } from './core/plugins/06-cache'
 import { authPlugin as jwtAuthPlugin } from './core/plugins/07-auth'
 import { authPlugin as authModulePlugin } from './modules/auth/auth.module'
@@ -42,6 +43,7 @@ export type AppFactoryOptions = {
   readonly eventBus?: IEventBus
   readonly queues?: QueueRegistry
   readonly healthChecks?: HealthChecks
+  readonly runWorkers?: boolean
 }
 
 export async function buildApp(options: AppFactoryOptions = {}): Promise<FastifyInstance<any, any, any, any, any>> {
@@ -71,6 +73,7 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
   // Make config available to all modules via Fastify's DI chain.
   // Modules access it as fastify.appConfig — never process.env directly.
   fastify.decorate('appConfig', appConfig)
+  fastify.decorate('runWorkers', options.runWorkers ?? false)
 
   await fastify.register(requestIdPlugin)
   await fastify.register(fastifyCookie, {
@@ -86,6 +89,7 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
     appConfig,
     ...(options.redis ? { redis: options.redis } : {}),
   })
+  await fastify.register(aiPlugin)
   await fastify.register(cachePlugin, {
     appConfig,
     ...(options.eventBus ? { eventBus: options.eventBus } : {}),

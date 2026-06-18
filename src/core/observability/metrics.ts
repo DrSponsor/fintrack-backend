@@ -89,6 +89,12 @@ export const webhooksUnresolvableTotal = new client.Counter({
   help: 'Total provider webhooks that cannot be resolved to a user.',
 })
 
+export const circuitBreakerStateGauge = new client.Gauge({
+  name: 'circuit_breaker_state',
+  help: 'Circuit breaker state (0 = closed, 1 = open, 2 = half-open).',
+  labelNames: ['name'] as const,
+})
+
 metricsRegistry.registerMetric(httpRequestsTotal)
 metricsRegistry.registerMetric(httpRequestDurationSeconds)
 metricsRegistry.registerMetric(workerJobsProcessedTotal)
@@ -103,3 +109,4 @@ metricsRegistry.registerMetric(aiApiCostUsdTotal)
 metricsRegistry.registerMetric(gmailApiCallsTotal)
 metricsRegistry.registerMetric(gmailApi429Total)
 metricsRegistry.registerMetric(webhooksUnresolvableTotal)
+metricsRegistry.registerMetric(circuitBreakerStateGauge)

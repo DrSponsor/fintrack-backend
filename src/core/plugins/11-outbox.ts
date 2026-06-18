@@ -7,13 +7,14 @@ export const outboxPlugin = fp((fastify: FastifyInstance<any, any, any, any, any
   const logger = fastify.log as unknown as AppLogger
   const nodeEnv = fastify.appConfig.nodeEnv
 
-  if (nodeEnv === 'test') {
+  if (nodeEnv === 'test' || !fastify.runWorkers) {
     done()
     return
   }
 
   const outboxWorker = new OutboxWorker({
     prisma: fastify.db.primary,
+    redis: fastify.redis,
     eventBus: fastify.eventBus,
     logger,
   })

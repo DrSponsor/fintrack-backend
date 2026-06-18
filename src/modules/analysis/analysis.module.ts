@@ -10,7 +10,6 @@ import { ForecastService } from './services/forecast.service'
 import { WeeklyReportService } from './services/weekly-report.service'
 import { MonthlyReportService } from './services/monthly-report.service'
 import { WeeklyReportWorker, MonthlyReportWorker } from './workers/report.worker'
-import { DeepSeekProvider } from '../../core/ai/deepseek.provider'
 import type { AppLogger } from '../../core/logger'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
 
@@ -29,10 +28,7 @@ const analysisModule: FastifyPluginCallback = (fastify, _options, done) => {
   const recurringDetector = new RecurringDetectorService()
   const forecastService = new ForecastService()
 
-  const aiProvider = new DeepSeekProvider({
-    apiKey: fastify.appConfig.deepseekApiKey ?? '',
-    categoriesMap: new Map(),
-  })
+  const aiProvider = fastify.ai
 
   const weeklyReportService = new WeeklyReportService({
     analysisRepo,
@@ -56,7 +52,7 @@ const analysisModule: FastifyPluginCallback = (fastify, _options, done) => {
 
   // 3. Register BullMQ workers (skipped in test environment to prevent connection noise)
   const nodeEnv = fastify.appConfig.nodeEnv
-  if (nodeEnv !== 'test') {
+  if (nodeEnv !== 'test' && fastify.runWorkers) {
     const workerDeps = {
       connection: createBullMqConnectionOptions(fastify.appConfig),
       concurrency: 2,
@@ -64,10 +60,25 @@ const analysisModule: FastifyPluginCallback = (fastify, _options, done) => {
       weeklyReportService,
       monthlyReportService,
       logger,
+      prisma: fastify.db.primary,
+      queues: fastify.queues,
     }
 
     const weeklyWorker = new WeeklyReportWorker(workerDeps)
     const monthlyWorker = new MonthlyReportWorker(workerDeps)
+
+    // Schedule repeatable cron jobs for active users recomputation
+    fastify.queues.analysisWeekly.add(
+      'recompute-all-users-weekly',
+      {},
+      { repeat: { pattern: '0 22 * * 0' } }
+    ).catch((err: unknown) => logger.error({ err }, 'Failed to schedule weekly report cron'))
+
+    fastify.queues.analysisMonthly.add(
+      'recompute-all-users-monthly',
+      {},
+      { repeat: { pattern: '1 0 1 * *' } }
+    ).catch((err: unknown) => logger.error({ err }, 'Failed to schedule monthly report cron'))
 
     fastify.addHook('onClose', async () => {
       logger.info('Stopping report recomputation workers...')
@@ -83,7 +94,7 @@ const analysisModule: FastifyPluginCallback = (fastify, _options, done) => {
   fastify.eventBus.subscribe('transaction.created', async (payload) => {
     try {
       // Fetch the transaction using the read replica to extract the transactionDate
-      const tx = await fastify.db.read.transaction.findUnique({
+      const tx = await fastify.db.read.transaction.findFirst({
         where: { id: payload.transactionId },
         select: { transactionDate: true },
       })

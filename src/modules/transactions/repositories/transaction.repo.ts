@@ -171,6 +171,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
         data: {
           id: eventId,
           transactionId,
+          transactionDate: data.transactionDate,
           type: 'CREATED',
           payload: eventPayload,
           previousHash,
@@ -197,7 +198,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
   }
 
   public async findById(id: string): Promise<TransactionRecord | null> {
-    const row = await this.prisma.transaction.findUnique({
+    const row = await this.prisma.transaction.findFirst({
       where: { id },
       select: SELECT_FIELDS,
     })
@@ -236,7 +237,19 @@ export class PrismaTransactionRepository implements ITransactionRepository {
       ...(cursor
         ? {
             skip: 1,
-            cursor: { id: cursor },
+            cursor: await (async () => {
+              if (cursor.includes('_')) {
+                const [id, dateStr] = cursor.split('_')
+                if (!id || !dateStr) throw new Error('Invalid cursor format')
+                return { id_transactionDate: { id, transactionDate: new Date(dateStr) } }
+              }
+              const tx = await this.prisma.transaction.findFirst({
+                where: { id: cursor },
+                select: { transactionDate: true },
+              })
+              if (!tx) throw new Error('Cursor transaction not found')
+              return { id_transactionDate: { id: cursor, transactionDate: tx.transactionDate } }
+            })(),
           }
         : {}),
       orderBy: { transactionDate: 'desc' },
@@ -258,6 +271,15 @@ export class PrismaTransactionRepository implements ITransactionRepository {
     userId: string,
     fingerprint: string,
   ): Promise<void> {
+    const tx = await this.prisma.transaction.findFirst({
+      where: { id },
+      select: { transactionDate: true },
+    })
+    if (!tx) {
+      throw new Error(`Transaction with id ${id} not found`)
+    }
+    const transactionDate = tx.transactionDate
+
     const previousHash = await this.findLastEventHash(id)
     const eventId = randomUUID()
     const eventTimestamp = new Date()
@@ -268,13 +290,14 @@ export class PrismaTransactionRepository implements ITransactionRepository {
 
     await this.prisma.$transaction([
       this.prisma.transaction.update({
-        where: { id },
+        where: { id_transactionDate: { id, transactionDate } },
         data: { categoryId },
       }),
       this.prisma.transactionEvent.create({
         data: {
           id: eventId,
           transactionId: id,
+          transactionDate,
           type: 'CORRECTED',
           payload: eventPayload,
           previousHash,

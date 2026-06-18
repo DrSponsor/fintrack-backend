@@ -81,7 +81,23 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     this.captureEmailQueue = deps.captureEmailQueue
   }
 
-  private async processJob(job: Job<EmailIngestJobData, void, string>): Promise<void> {
+  private async processJob(job: Job<any, void, string>): Promise<void> {
+    if (job.name === 'cleanup-raw-snippets') {
+      const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      this.logger.info({ cutoff }, 'Starting raw transaction snippet cleanup job...')
+      const updated = await this.prisma.transaction.updateMany({
+        where: {
+          rawSnippetEnc: { not: null },
+          createdAt: { lt: cutoff },
+        },
+        data: {
+          rawSnippetEnc: null,
+        },
+      })
+      this.logger.info({ count: updated.count }, 'Raw transaction snippet cleanup job complete.')
+      return
+    }
+
     if (job.name === 'sync-history') {
       const { accountId, historyId } = job.data as { accountId: string; historyId: string }
       

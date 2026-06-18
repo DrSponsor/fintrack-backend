@@ -31,7 +31,7 @@ export const rateLimitPlugin: FastifyPluginCallback = fp((fastify, _options, don
       return
     }
 
-    const config = request.routeOptions?.config as Record<string, unknown> | undefined
+    const config = request.routeOptions?.config as unknown as Record<string, unknown> | undefined
     const routeConfig = config?.rateLimit as { window?: number; max?: number } | undefined
     const windowSeconds = routeConfig?.window ?? WINDOW_SECONDS
     const limit = routeConfig?.max ?? (request.user === undefined ? GLOBAL_IP_LIMIT : STANDARD_LIMIT)
