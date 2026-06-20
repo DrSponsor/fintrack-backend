@@ -15,6 +15,7 @@ model User {
   passwordHash String   @map("password_hash")
   tier         Tier     @default(FREE)
   createdAt    DateTime @default(now()) @map("created_at")
+  deletionScheduledAt DateTime? @map("deletion_scheduled_at")
 
   accounts              Account[]
   budgets               Budget[]
@@ -22,6 +23,8 @@ model User {
   subscription          Subscription?
   merchantPreferences   UserMerchantPreference[]
   billingEvents         BillingEvent[]
+  deviceTokens          DeviceToken[]
+  notificationPreference NotificationPreference?
 
   @@map("users")
 }
@@ -259,6 +262,7 @@ model BillingEvent {
   eventType       String          @map("event_type")
   normalizedType  String          @map("normalized_type")
   userId          String?         @map("user_id") @db.Uuid
+  anonymizedUserId String?        @map("anonymized_user_id") @db.Uuid
   payload         Json
   processed       Boolean         @default(false)
   processedAt     DateTime?       @map("processed_at")
@@ -341,3 +345,34 @@ enum MerchantMappingSource {
   USER_CORRECTION
   AI_CONFIRMED
 }
+
+model DeviceToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique
+  platform  String   @map("platform") // 'ANDROID' | 'IOS'
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+model NotificationPreference {
+  id                   String   @id @default(uuid()) @db.Uuid
+  userId               String   @unique @map("user_id") @db.Uuid
+  budgetAlerts         Boolean  @default(true) @map("budget_alerts")
+  paymentFailures      Boolean  @default(true) @map("payment_failures")
+  subscriptionExpiring Boolean  @default(true) @map("subscription_expiring")
+  weeklyReports        Boolean  @default(true) @map("weekly_reports")
+  monthlyReports       Boolean  @default(true) @map("monthly_reports")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+

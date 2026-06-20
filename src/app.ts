@@ -26,6 +26,8 @@ import { capturePlugin } from './modules/capture/capture.module'
 import { budgetsPlugin } from './modules/budgets/budgets.module'
 import { analysisPlugin } from './modules/analysis/analysis.module'
 import { billingPlugin } from './modules/billing/billing.module'
+import { notificationsPlugin } from './modules/notifications/notifications.module'
+import { privacyPlugin } from './modules/privacy/privacy.module'
 import { outboxPlugin } from './core/plugins/11-outbox'
 import { idempotencyPlugin } from './core/plugins/08-idempotency'
 import { auditPlugin } from './core/plugins/09-audit'
@@ -112,6 +114,8 @@ export async function buildApp(options: AppFactoryOptions = {}): Promise<Fastify
   await fastify.register(budgetsPlugin)
   await fastify.register(analysisPlugin)
   await fastify.register(billingPlugin)
+  await fastify.register(notificationsPlugin)
+  await fastify.register(privacyPlugin)
 
   // ── Infrastructure routes ───────────────────────────────────
   registerHealthRoutes(fastify, options.healthChecks)

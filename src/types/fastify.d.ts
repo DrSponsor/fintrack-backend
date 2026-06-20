@@ -40,5 +40,9 @@ declare module 'fastify' {
       readonly action: string
       readonly resourceType: string
     }
+    rateLimit?: {
+      readonly max?: number
+      readonly window?: number
+    }
   }
 }

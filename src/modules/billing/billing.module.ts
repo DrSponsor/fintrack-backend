@@ -58,6 +58,7 @@ const billingModule: FastifyPluginCallback = (fastify, _options, done) => {
       billingProvider,
       prisma: fastify.db.primary,
       redis: fastify.redis,
+      queues: fastify.queues,
     })
 
     // Schedule repeatable cron checks:

@@ -9,6 +9,8 @@ export const QUEUE_NAMES = {
   notificationsPush: 'notifications.push',
   watchRenewal: 'watch.renewal',
   billingWebhooks: 'billing.webhooks',
+  privacyDeletion: 'privacy.deletion',
+  privacyExport: 'privacy.export',
 } as const
 
 export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES]
@@ -21,6 +23,8 @@ export type QueueRegistry = {
   readonly notificationsPush: Queue
   readonly watchRenewal: Queue
   readonly billingWebhooks: Queue
+  readonly privacyDeletion: Queue
+  readonly privacyExport: Queue
   close(): Promise<void>
 }
 
@@ -94,6 +98,26 @@ export function createQueueRegistry(connection: ConnectionOptions): QueueRegistr
     },
   })
 
+  const privacyDeletion = new Queue(QUEUE_NAMES.privacyDeletion, {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 30_000 },
+      removeOnComplete: 100,
+      removeOnFail: false,
+    },
+  })
+
+  const privacyExport = new Queue(QUEUE_NAMES.privacyExport, {
+    connection,
+    defaultJobOptions: {
+      attempts: 2,
+      backoff: { type: 'fixed', delay: 15_000 },
+      removeOnComplete: 100,
+      removeOnFail: false,
+    },
+  })
+
   return {
     captureEmail,
     captureManual,
@@ -102,6 +126,8 @@ export function createQueueRegistry(connection: ConnectionOptions): QueueRegistr
     notificationsPush,
     watchRenewal,
     billingWebhooks,
+    privacyDeletion,
+    privacyExport,
     async close(): Promise<void> {
       await Promise.all([
         captureEmail.close(),
@@ -111,6 +137,8 @@ export function createQueueRegistry(connection: ConnectionOptions): QueueRegistr
         notificationsPush.close(),
         watchRenewal.close(),
         billingWebhooks.close(),
+        privacyDeletion.close(),
+        privacyExport.close(),
       ])
     },
   }

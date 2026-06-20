@@ -95,6 +95,19 @@ export const circuitBreakerStateGauge = new client.Gauge({
   labelNames: ['name'] as const,
 })
 
+export const externalApiCallsTotal = new client.Counter({
+  name: 'external_api_calls_total',
+  help: 'Total external service API calls.',
+  labelNames: ['service', 'status'] as const,
+})
+
+export const externalApiCallDurationSeconds = new client.Histogram({
+  name: 'external_api_call_duration_seconds',
+  help: 'External service API call duration in seconds.',
+  labelNames: ['service'] as const,
+  buckets: [0.01, 0.05, 0.1, 0.5, 1, 3, 5, 10],
+})
+
 metricsRegistry.registerMetric(httpRequestsTotal)
 metricsRegistry.registerMetric(httpRequestDurationSeconds)
 metricsRegistry.registerMetric(workerJobsProcessedTotal)
@@ -110,3 +123,6 @@ metricsRegistry.registerMetric(gmailApiCallsTotal)
 metricsRegistry.registerMetric(gmailApi429Total)
 metricsRegistry.registerMetric(webhooksUnresolvableTotal)
 metricsRegistry.registerMetric(circuitBreakerStateGauge)
+metricsRegistry.registerMetric(externalApiCallsTotal)
+metricsRegistry.registerMetric(externalApiCallDurationSeconds)
+

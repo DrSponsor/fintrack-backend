@@ -40,6 +40,11 @@ const envSchema = z.object({
   PAYSTACK_SECRET_KEY: z.string().optional().or(z.literal('')),
   PAYSTACK_PLAN_PRO_MONTHLY: z.string().optional().or(z.literal('')),
   PAYSTACK_PLAN_PRO_ANNUAL: z.string().optional().or(z.literal('')),
+  FIREBASE_PROJECT_ID: z.string().optional().or(z.literal('')),
+  FIREBASE_CLIENT_EMAIL: z.string().optional().or(z.literal('')),
+  FIREBASE_PRIVATE_KEY: z.string().optional().or(z.literal('')),
+  POSTMARK_SERVER_TOKEN: z.string().optional().or(z.literal('')),
+  EMAIL_FROM: z.string().default('no-reply@fintrack.ng'),
 }).superRefine((value, context) => {
   const key = Buffer.from(value.FIELD_ENCRYPTION_KEY_BASE64, 'base64')
   if (key.byteLength !== 32) {
@@ -107,6 +112,34 @@ const envSchema = z.object({
         message: 'PAYSTACK_PLAN_PRO_ANNUAL is required in production',
       })
     }
+    if (!value.FIREBASE_PROJECT_ID) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['FIREBASE_PROJECT_ID'],
+        message: 'FIREBASE_PROJECT_ID is required in production',
+      })
+    }
+    if (!value.FIREBASE_CLIENT_EMAIL) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['FIREBASE_CLIENT_EMAIL'],
+        message: 'FIREBASE_CLIENT_EMAIL is required in production',
+      })
+    }
+    if (!value.FIREBASE_PRIVATE_KEY) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['FIREBASE_PRIVATE_KEY'],
+        message: 'FIREBASE_PRIVATE_KEY is required in production',
+      })
+    }
+    if (!value.POSTMARK_SERVER_TOKEN) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['POSTMARK_SERVER_TOKEN'],
+        message: 'POSTMARK_SERVER_TOKEN is required in production',
+      })
+    }
   }
 })
 
@@ -131,6 +164,11 @@ export type AppConfig = {
   readonly paystackSecretKey?: string
   readonly paystackPlanProMonthly?: string
   readonly paystackPlanProAnnual?: string
+  readonly firebaseProjectId?: string
+  readonly firebaseClientEmail?: string
+  readonly firebasePrivateKey?: string
+  readonly postmarkServerToken?: string
+  readonly emailFrom: string
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -160,5 +198,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     paystackSecretKey: parsed.PAYSTACK_SECRET_KEY || 'ts_paystack_secret_key_fallback',
     paystackPlanProMonthly: parsed.PAYSTACK_PLAN_PRO_MONTHLY || 'PLN_test_monthly',
     paystackPlanProAnnual: parsed.PAYSTACK_PLAN_PRO_ANNUAL || 'PLN_test_annual',
+    ...(parsed.FIREBASE_PROJECT_ID ? { firebaseProjectId: parsed.FIREBASE_PROJECT_ID } : {}),
+    ...(parsed.FIREBASE_CLIENT_EMAIL ? { firebaseClientEmail: parsed.FIREBASE_CLIENT_EMAIL } : {}),
+    ...(parsed.FIREBASE_PRIVATE_KEY ? { firebasePrivateKey: parsed.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') } : {}),
+    ...(parsed.POSTMARK_SERVER_TOKEN ? { postmarkServerToken: parsed.POSTMARK_SERVER_TOKEN } : {}),
+    emailFrom: parsed.EMAIL_FROM,
   }
 }
