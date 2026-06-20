@@ -163,6 +163,8 @@ export function createQueueRegistryStub(): QueueRegistry {
     notificationsPush: createQueueStub(),
     watchRenewal: createQueueStub(),
     billingWebhooks: createQueueStub(),
+    privacyDeletion: createQueueStub(),
+    privacyExport: createQueueStub(),
     close: (): Promise<void> => Promise.resolve(),
   }
 }

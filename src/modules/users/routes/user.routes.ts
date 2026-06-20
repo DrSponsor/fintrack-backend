@@ -1,15 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { GetProfileUseCase } from '../use-cases/get-profile.use-case'
 import { UpdateProfileUseCase } from '../use-cases/update-profile.use-case'
-import { DeleteDataUseCase } from '../use-cases/delete-data.use-case'
 import { PrismaUserProfileRepository } from '../repositories/user-profile.repo'
-import { RedisSessionRepository } from '../../auth/repositories/session.repo'
 import { authenticate } from '../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../core/http/envelope'
 import {
   profileJsonSchema,
   updateProfileJsonSchema,
-  deleteDataJsonSchema,
 } from '../schemas/user.schemas'
 
 /**
@@ -21,7 +18,6 @@ import {
  */
 export function registerUserRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
   const userProfileRepo = new PrismaUserProfileRepository(fastify.db.primary)
-  const sessionRepo = new RedisSessionRepository(fastify.redis)
 
   const getProfileUseCase = new GetProfileUseCase({
     userProfileRepo,
@@ -30,13 +26,6 @@ export function registerUserRoutes(fastify: FastifyInstance<any, any, any, any, 
 
   const updateProfileUseCase = new UpdateProfileUseCase({
     userProfileRepo,
-    logger: fastify.log,
-  })
-
-  const deleteDataUseCase = new DeleteDataUseCase({
-    userProfileRepo,
-    sessionRepo,
-    redis: fastify.redis,
     logger: fastify.log,
   })
 
@@ -80,19 +69,5 @@ export function registerUserRoutes(fastify: FastifyInstance<any, any, any, any, 
       },
       request.requestId,
     )
-  })
-
-  // ── DELETE /v1/users/me/data ───────────────────────────────────
-  // NDPR deletion with 24-hour cooling-off period
-  fastify.delete('/v1/users/me/data', {
-    schema: deleteDataJsonSchema,
-    preHandler: [authenticate],
-    config: {
-      audit: { action: 'request_data_deletion', resourceType: 'user' },
-    },
-  }, async (request) => {
-    const result = await deleteDataUseCase.execute(request.user!.sub)
-
-    return successEnvelope(result, request.requestId)
   })
 }

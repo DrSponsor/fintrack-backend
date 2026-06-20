@@ -45,6 +45,10 @@ export function rateLimited(message = 'Too many requests'): AppError {
   return new AppError(ERROR_CODES.RATE_LIMITED, message, 429)
 }
 
+export function deletionPending(message = 'Account is scheduled for deletion'): AppError {
+  return new AppError(ERROR_CODES.DELETION_PENDING, message, 409)
+}
+
 export function dependencyUnavailable(message = 'Dependency unavailable'): AppError {
   return new AppError(ERROR_CODES.DEPENDENCY_UNAVAILABLE, message, 503, { expose: true })
 }

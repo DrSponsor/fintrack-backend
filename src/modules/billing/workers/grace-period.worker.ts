@@ -3,12 +3,14 @@ import type { ISubscriptionRepository } from '../repositories/billing.repo'
 import type { IUserRepository } from '../../auth/repositories/user.repo'
 import type { PrismaClient } from '../../../generated/prisma/client'
 import type { AppLogger } from '../../../core/logger'
+import type { QueueRegistry } from '../../../core/queue/queues'
 
 export type GracePeriodDeps = {
   readonly subscriptionRepo: ISubscriptionRepository
   readonly userRepo: IUserRepository
   readonly prisma: PrismaClient
   readonly redis: Redis
+  readonly queues: QueueRegistry
   readonly logger: AppLogger
 }
 
@@ -39,7 +41,15 @@ export async function runGracePeriodDowngrade(deps: GracePeriodDeps): Promise<vo
 
       // Set tier-change signal in Redis
       await deps.redis.set(`tier-change:${sub.userId}`, '1', 'EX', 3600)
-      deps.logger.info({ userId: sub.userId, type: 'subscription_expired' }, 'Notification sent: subscription_expired')
+      
+      // Queue the subscription expired notification
+      await deps.queues.notificationsPush.add(
+        'subscription-expired',
+        { userId: sub.userId },
+        { jobId: `subscription-expired:${sub.userId}:${Date.now()}` }
+      )
+      
+      deps.logger.info({ userId: sub.userId, type: 'subscription_expired' }, 'Downgrade complete. Notification queued.')
     } catch (err) {
       deps.logger.error({ userId: sub.userId, err }, 'grace-period: downgrade transaction failed')
     }

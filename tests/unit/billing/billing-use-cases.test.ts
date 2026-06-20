@@ -332,11 +332,18 @@ describe('Subscription Service & Workers', () => {
         },
       } as any
 
+      const mockQueues = {
+        notificationsPush: {
+          add: vi.fn().mockResolvedValue({}),
+        },
+      } as any
+
       await runGracePeriodDowngrade({
         subscriptionRepo,
         userRepo,
         prisma: mockPrisma,
         redis: mockRedis,
+        queues: mockQueues,
         logger: mockLogger,
       })
 
@@ -350,6 +357,11 @@ describe('Subscription Service & Workers', () => {
         data: { tier: 'FREE' },
       }))
       expect(mockRedis.set).toHaveBeenCalledWith('tier-change:user-expired', '1', 'EX', 3600)
+      expect(mockQueues.notificationsPush.add).toHaveBeenCalledWith(
+        'subscription-expired',
+        { userId: 'user-expired' },
+        expect.any(Object)
+      )
     })
   })
 })

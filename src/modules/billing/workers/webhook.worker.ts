@@ -13,6 +13,7 @@ import type { IBillingProvider } from '../providers/billing-provider.interface'
 import { NormalizedEventType } from '../providers/billing-provider.interface'
 import type { AppLogger } from '../../../core/logger'
 import { webhooksUnresolvableTotal } from '../../../core/observability/metrics'
+import type { QueueRegistry } from '../../../core/queue/queues'
 
 export type WebhookJobData = {
   readonly providerEventId: string
@@ -29,6 +30,7 @@ export type WebhookWorkerDeps = {
   readonly billingProvider: IBillingProvider
   readonly prisma: PrismaClient
   readonly redis: Redis
+  readonly queues: QueueRegistry
 }
 
 export class BillingWebhookWorker extends BaseWorker<any, void> {
@@ -40,6 +42,7 @@ export class BillingWebhookWorker extends BaseWorker<any, void> {
   private readonly prisma: PrismaClient
   private readonly redis: Redis
   private readonly logger: AppLogger
+  private readonly queues: QueueRegistry
 
   public constructor(deps: WebhookWorkerDeps) {
     super({
@@ -61,6 +64,7 @@ export class BillingWebhookWorker extends BaseWorker<any, void> {
             userRepo: this.userRepo,
             prisma: this.prisma,
             redis: this.redis,
+            queues: this.queues,
             logger: this.logger,
           })
         } else {
@@ -78,6 +82,7 @@ export class BillingWebhookWorker extends BaseWorker<any, void> {
     this.prisma = deps.prisma
     this.redis = deps.redis
     this.logger = deps.logger
+    this.queues = deps.queues
   }
 
   private async processWebhookEvent(providerEventId: string): Promise<void> {
@@ -114,7 +119,12 @@ export class BillingWebhookWorker extends BaseWorker<any, void> {
 
         case NormalizedEventType.PAYMENT_FAILED:
           await this.subscriptionService.setGracePeriod(event.userId, 7) // 7 days grace period
-          this.logger.info({ userId: event.userId, type: 'payment_failed' }, 'Notification sent: payment_failed')
+          await this.queues.notificationsPush.add(
+            'payment-failed',
+            { userId: event.userId },
+            { jobId: `payment-failed:${event.userId}:${Date.now()}` }
+          )
+          this.logger.info({ userId: event.userId, type: 'payment_failed' }, 'Payment failed. Notification queued.')
           break
 
         case NormalizedEventType.SUBSCRIPTION_CANCELLED:
@@ -122,7 +132,12 @@ export class BillingWebhookWorker extends BaseWorker<any, void> {
           break
 
         case NormalizedEventType.CARD_EXPIRING_SOON:
-          this.logger.info({ userId: event.userId, type: 'card_expiring' }, 'Notification sent: card_expiring')
+          await this.queues.notificationsPush.add(
+            'card-expiring',
+            { userId: event.userId },
+            { jobId: `card-expiring:${event.userId}:${Date.now()}` }
+          )
+          this.logger.info({ userId: event.userId, type: 'card_expiring' }, 'Card expiring. Notification queued.')
           break
       }
 
