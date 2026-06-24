@@ -12,7 +12,8 @@ model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique
   phone        String?  @unique
-  passwordHash String   @map("password_hash")
+  passwordHash String?  @map("password_hash")
+  googleId     String?  @unique @map("google_id")
   tier         Tier     @default(FREE)
   createdAt    DateTime @default(now()) @map("created_at")
   deletionScheduledAt DateTime? @map("deletion_scheduled_at")

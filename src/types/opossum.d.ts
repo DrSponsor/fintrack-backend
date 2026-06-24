@@ -12,5 +12,6 @@ declare module 'opossum' {
     public constructor(action: (...args: any[]) => Promise<TR>, options?: CircuitBreakerOptions)
     public fire(...args: TI): Promise<TR>
     public fallback(fallbackFunction: (...args: any[]) => any): this
+    public readonly opened: boolean
   }
 }

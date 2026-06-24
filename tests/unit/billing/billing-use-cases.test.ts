@@ -51,6 +51,7 @@ function makeUserRecord(overrides: Partial<UserRecord> = {}): UserRecord {
     id: 'user-1',
     email: 'test@fintrack.ng',
     passwordHash: 'hash',
+    googleId: null,
     tier: 'FREE',
     role: 'user',
     createdAt: new Date(),
@@ -81,6 +82,8 @@ function createMockUserRepo(user: UserRecord | null = null): IUserRepository {
     findByEmail: vi.fn().mockResolvedValue(user ?? makeUserRecord()),
     findById: vi.fn().mockResolvedValue(user ?? makeUserRecord()),
     updateTier: vi.fn().mockResolvedValue(undefined),
+    findByGoogleId: vi.fn().mockResolvedValue(null),
+    linkGoogleId: vi.fn().mockResolvedValue(undefined),
   }
 }
 
