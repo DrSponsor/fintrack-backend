@@ -31,6 +31,7 @@ const billingModule: FastifyPluginCallback = (fastify, _options, done) => {
     subscriptionRepo,
     userRepo,
     redis: fastify.redis,
+    providerName: billingProvider.providerName.toUpperCase() as 'PAYSTACK' | 'MONNIFY',
   })
 
   const billingService = new BillingService({

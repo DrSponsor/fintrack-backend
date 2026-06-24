@@ -36,7 +36,7 @@ export function registerWebhookRoute(
     },
   }, async (request, reply) => {
     try {
-      const signatureHeader = request.headers['x-paystack-signature'] as string | undefined
+      const signatureHeader = request.headers[deps.billingProvider.signatureHeaderName] as string | undefined
       const rawBody = (request as unknown as { rawBody?: string }).rawBody
 
       const result = await useCase.execute({

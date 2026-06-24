@@ -1,3 +1,4 @@
+import CircuitBreaker from 'opossum'
 import type { AppConfig } from '../../../../config'
 import type { IAccountRepository } from '../../../accounts/repositories/account.repo'
 import { decryptField, encryptField, decodeFieldEncryptionKey } from '../../../../core/crypto/encryption'
@@ -17,12 +18,31 @@ export class OAuthService {
   private readonly accountRepo: IAccountRepository
   private readonly logger: AppLogger
   private readonly encryptionKey: Buffer
+  private readonly breaker: CircuitBreaker<[string, RequestInit], Response>
 
   public constructor(config: AppConfig, accountRepo: IAccountRepository, logger: AppLogger) {
     this.config = config
     this.accountRepo = accountRepo
     this.logger = logger
     this.encryptionKey = decodeFieldEncryptionKey(config.fieldEncryptionKeyBase64)
+
+    this.breaker = new CircuitBreaker(
+      this.fetchGoogle.bind(this),
+      {
+        timeout: 10000, // 10 seconds timeout
+        errorThresholdPercentage: 50,
+        resetTimeout: 30000,
+      }
+    )
+  }
+
+  private async fetchGoogle(url: string, options: RequestInit): Promise<Response> {
+    const response = await fetch(url, options)
+    if (!response.ok) {
+      const text = await response.text().catch(() => 'Unknown error')
+      throw new Error(`Google API error [${response.status}]: ${text}`)
+    }
+    return response
   }
 
   public getConsentUrl(): string {
@@ -48,23 +68,23 @@ export class OAuthService {
       throw new Error('Google OAuth is not fully configured')
     }
 
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-      }),
-    })
-
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text()
-      this.logger.error({ status: tokenResponse.status, errorText }, 'Google OAuth code exchange failed')
+    let tokenResponse: Response
+    try {
+      tokenResponse = await this.breaker.fire('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          code,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+        }),
+      })
+    } catch (err) {
+      this.logger.error({ err }, 'Google OAuth code exchange failed or timed out')
       throw validationError('Failed to exchange authorization code with Google')
     }
 
@@ -80,13 +100,15 @@ export class OAuthService {
     }
 
     // Fetch user info to verify the email
-    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    })
-
-    if (!userInfoResponse.ok) {
+    let userInfoResponse: Response
+    try {
+      userInfoResponse = await this.breaker.fire('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
+    } catch (err) {
+      this.logger.error({ err }, 'Failed to retrieve user info from Google or timed out')
       throw validationError('Failed to retrieve user info from Google')
     }
 
@@ -162,25 +184,25 @@ export class OAuthService {
       throw new Error('Google OAuth is not fully configured')
     }
 
-    const refreshResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-      }),
-    })
-
-    if (!refreshResponse.ok) {
-      const errorText = await refreshResponse.text()
-      this.logger.error({ status: refreshResponse.status, errorText, accountId }, 'Google OAuth token refresh failed')
+    let refreshResponse: Response
+    try {
+      refreshResponse = await this.breaker.fire('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+          grant_type: 'refresh_token',
+        }),
+      })
+    } catch (err: any) {
+      this.logger.error({ err, accountId }, 'Google OAuth token refresh failed or timed out')
       
       // If the token was revoked or is invalid, mark the account as disconnected
-      if (refreshResponse.status === 400 || refreshResponse.status === 401) {
+      if (err.message && (err.message.includes('[400]') || err.message.includes('[401]'))) {
         await this.accountRepo.updateGmailToken(accountId, null, false)
         throw tokenRevoked('Gmail connection was revoked by the user or has expired')
       }
@@ -227,7 +249,7 @@ export class OAuthService {
         
         // Attempt to revoke the token from Google side (best effort)
         const tokenToRevoke = payload.refreshToken ?? payload.accessToken
-        await fetch('https://oauth2.googleapis.com/revoke', {
+        await this.breaker.fire('https://oauth2.googleapis.com/revoke', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',

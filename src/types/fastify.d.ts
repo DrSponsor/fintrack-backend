@@ -30,6 +30,7 @@ declare module 'fastify' {
     idempotency?: {
       readonly key: string
       readonly cacheKey: string
+      readonly lockKey: string
       readonly state: 'registered'
     }
   }

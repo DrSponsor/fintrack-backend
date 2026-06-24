@@ -56,7 +56,7 @@ export class ProcessWebhookUseCase {
 
     try {
       await this.billingRepo.create({
-        provider: 'PAYSTACK',
+        provider: this.billingProvider.providerName.toUpperCase() as 'PAYSTACK' | 'MONNIFY',
         providerEventId,
         eventType,
         normalizedType: normalized.normalizedType,
