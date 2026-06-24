@@ -3,16 +3,19 @@ import { RegisterUseCase } from '../use-cases/register.use-case'
 import { LoginUseCase } from '../use-cases/login.use-case'
 import { RefreshUseCase } from '../use-cases/refresh.use-case'
 import { LogoutUseCase } from '../use-cases/logout.use-case'
+import { GoogleAuthUseCase } from '../use-cases/google-auth.use-case'
 import { PrismaUserRepository } from '../repositories/user.repo'
 import { RedisSessionRepository } from '../repositories/session.repo'
 import { authenticate } from '../../../core/middleware/authenticate'
-import { unauthenticated } from '../../../core/errors/factories'
+import { unauthenticated, validationError } from '../../../core/errors/factories'
 import { successEnvelope } from '../../../core/http/envelope'
 import {
   registerJsonSchema,
   loginJsonSchema,
   refreshJsonSchema,
   logoutJsonSchema,
+  googleAuthJsonSchema,
+  googleAuthBodySchema,
 } from '../schemas/auth.schemas'
 
 /**
@@ -64,6 +67,14 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
 
   const logoutUseCase = new LogoutUseCase({
     sessionRepo,
+    logger: fastify.log,
+  })
+
+  const googleAuthUseCase = new GoogleAuthUseCase({
+    userRepo,
+    sessionRepo,
+    googleClientId: fastify.appConfig.googleClientId,
+    jwtPrivateKeyPem,
     logger: fastify.log,
   })
 
@@ -179,6 +190,40 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
 
     return reply.code(200).send(successEnvelope(
       { message: 'Logged out successfully' },
+      request.requestId,
+    ))
+  })
+
+  // ── POST /v1/auth/google ───────────────────────────────────────
+  fastify.post('/v1/auth/google', {
+    schema: googleAuthJsonSchema,
+    config: {
+      audit: { action: 'google_login', resourceType: 'session' },
+      rateLimit: { max: 20, window: 60 },
+    },
+  }, async (request, reply) => {
+    const parsed = googleAuthBodySchema.safeParse(request.body)
+    if (!parsed.success) {
+      throw validationError(parsed.error.issues[0]?.message ?? 'Invalid request body')
+    }
+
+    const { idToken } = parsed.data
+    const result = await googleAuthUseCase.execute(idToken)
+
+    reply.setCookie('refreshToken', result.refreshToken, {
+      path: '/v1/auth',
+      httpOnly: true,
+      secure: fastify.appConfig.nodeEnv === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60,
+    })
+
+    return reply.code(200).send(successEnvelope(
+      {
+        userId: result.userId,
+        accessToken: result.accessToken,
+        expiresIn: result.expiresIn,
+      },
       request.requestId,
     ))
   })

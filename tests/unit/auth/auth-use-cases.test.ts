@@ -3,6 +3,7 @@ import { RegisterUseCase } from '../../../src/modules/auth/use-cases/register.us
 import { LoginUseCase } from '../../../src/modules/auth/use-cases/login.use-case'
 import { RefreshUseCase } from '../../../src/modules/auth/use-cases/refresh.use-case'
 import { LogoutUseCase } from '../../../src/modules/auth/use-cases/logout.use-case'
+import { GoogleAuthUseCase } from '../../../src/modules/auth/use-cases/google-auth.use-case'
 import type { IUserRepository, UserRecord } from '../../../src/modules/auth/repositories/user.repo'
 import type { ISessionRepository, CreateSessionResult } from '../../../src/modules/auth/repositories/session.repo'
 import { hashPassword } from '../../../src/core/crypto/hashing'
@@ -35,6 +36,7 @@ function makeUserRecord(overrides: Partial<UserRecord> = {}): UserRecord {
     id: randomUUID(),
     email: 'test@fintrack.ng',
     passwordHash: 'hash',
+    googleId: null,
     tier: 'FREE',
     role: 'user',
     createdAt: new Date(),
@@ -54,6 +56,8 @@ function createMockUserRepo(overrides: Partial<IUserRepository> = {}): IUserRepo
     create: vi.fn().mockResolvedValue(makeUserRecord()),
     findByEmail: vi.fn().mockResolvedValue(null),
     findById: vi.fn().mockResolvedValue(null),
+    findByGoogleId: vi.fn().mockResolvedValue(null),
+    linkGoogleId: vi.fn().mockResolvedValue(undefined),
     updateTier: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -252,6 +256,32 @@ describe('LoginUseCase', () => {
       expect((err as AppError).code).toBe(ERROR_CODES.INVALID_CREDENTIALS)
     }
   })
+
+  it('protects against timing attacks on accounts without password hashes (Google-only user)', async () => {
+    const userRepo = createMockUserRepo({
+      findByEmail: vi.fn().mockResolvedValue(
+        makeUserRecord({ passwordHash: null, googleId: 'google-123' }),
+      ),
+    })
+
+    const useCase = new LoginUseCase({
+      userRepo,
+      sessionRepo: createMockSessionRepo(),
+      jwtPrivateKeyPem: privateKey,
+      logger: silentLogger,
+    })
+
+    try {
+      await useCase.execute({
+        email: 'google-user@fintrack.ng',
+        password: 'AnyPassword123',
+      })
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError)
+      expect((err as AppError).code).toBe(ERROR_CODES.INVALID_CREDENTIALS)
+    }
+  })
 })
 
 // ──────────────────────────────────────────────────────────────────
@@ -350,5 +380,195 @@ describe('LogoutUseCase', () => {
     await useCase.execute(userId, sessionId)
 
     expect(sessionRepo.revoke).toHaveBeenCalledWith(userId, sessionId)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────
+// GoogleAuthUseCase
+// ──────────────────────────────────────────────────────────────────
+
+describe('GoogleAuthUseCase', () => {
+  const googleClientId = 'google-client-id-123'
+
+  it('verifies token and registers a new user (automatic signup)', async () => {
+    const userId = randomUUID()
+    const sessionId = randomUUID()
+    
+    const userRepo = createMockUserRepo({
+      findByGoogleId: vi.fn().mockResolvedValue(null),
+      findByEmail: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue(makeUserRecord({ id: userId, email: 'google@fintrack.ng', googleId: 'sub-123' })),
+    })
+
+    const sessionRepo = createMockSessionRepo({
+      create: vi.fn().mockResolvedValue({ sessionId, refreshToken: 'rt-123' }),
+    })
+
+    const useCase = new GoogleAuthUseCase({
+      userRepo,
+      sessionRepo,
+      googleClientId,
+      jwtPrivateKeyPem: privateKey,
+      logger: silentLogger,
+    })
+
+    const spyFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        sub: 'sub-123',
+        email: 'google@fintrack.ng',
+        email_verified: true,
+        aud: googleClientId,
+      }),
+    } as Response)
+
+    const result = await useCase.execute('valid-id-token')
+
+    expect(result.userId).toBe(userId)
+    expect(result.accessToken).toBeTruthy()
+    expect(result.refreshToken).toBe('rt-123')
+    expect(result.expiresIn).toBe(900)
+    expect(userRepo.create).toHaveBeenCalledWith({ email: 'google@fintrack.ng', googleId: 'sub-123' })
+    expect(sessionRepo.create).toHaveBeenCalledWith(userId)
+    
+    spyFetch.mockRestore()
+  })
+
+  it('verifies token and logs in an existing Google user', async () => {
+    const userId = randomUUID()
+    const sessionId = randomUUID()
+    
+    const userRepo = createMockUserRepo({
+      findByGoogleId: vi.fn().mockResolvedValue(
+        makeUserRecord({ id: userId, email: 'google@fintrack.ng', googleId: 'sub-123' })
+      ),
+    })
+
+    const sessionRepo = createMockSessionRepo({
+      create: vi.fn().mockResolvedValue({ sessionId, refreshToken: 'rt-123' }),
+    })
+
+    const useCase = new GoogleAuthUseCase({
+      userRepo,
+      sessionRepo,
+      googleClientId,
+      jwtPrivateKeyPem: privateKey,
+      logger: silentLogger,
+    })
+
+    const spyFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        sub: 'sub-123',
+        email: 'google@fintrack.ng',
+        email_verified: 'true',
+        aud: googleClientId,
+      }),
+    } as Response)
+
+    const result = await useCase.execute('valid-id-token')
+
+    expect(result.userId).toBe(userId)
+    expect(result.accessToken).toBeTruthy()
+    expect(userRepo.findByGoogleId).toHaveBeenCalledWith('sub-123')
+    expect(userRepo.create).not.toHaveBeenCalled()
+    expect(sessionRepo.create).toHaveBeenCalledWith(userId)
+
+    spyFetch.mockRestore()
+  })
+
+  it('links Google ID to existing password-auth user with same email', async () => {
+    const userId = randomUUID()
+    const sessionId = randomUUID()
+    
+    const userRepo = createMockUserRepo({
+      findByGoogleId: vi.fn().mockResolvedValue(null),
+      findByEmail: vi.fn().mockResolvedValue(
+        makeUserRecord({ id: userId, email: 'user@fintrack.ng', passwordHash: 'existing-hash', googleId: null })
+      ),
+    })
+
+    const sessionRepo = createMockSessionRepo({
+      create: vi.fn().mockResolvedValue({ sessionId, refreshToken: 'rt-123' }),
+    })
+
+    const useCase = new GoogleAuthUseCase({
+      userRepo,
+      sessionRepo,
+      googleClientId,
+      jwtPrivateKeyPem: privateKey,
+      logger: silentLogger,
+    })
+
+    const spyFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        sub: 'sub-123',
+        email: 'user@fintrack.ng',
+        email_verified: true,
+        aud: googleClientId,
+      }),
+    } as Response)
+
+    const result = await useCase.execute('valid-id-token')
+
+    expect(result.userId).toBe(userId)
+    expect(result.accessToken).toBeTruthy()
+    expect(userRepo.linkGoogleId).toHaveBeenCalledWith(userId, 'sub-123')
+    expect(userRepo.create).not.toHaveBeenCalled()
+    expect(sessionRepo.create).toHaveBeenCalledWith(userId)
+
+    spyFetch.mockRestore()
+  })
+
+  it('throws UNAUTHENTICATED when Google token signature is invalid', async () => {
+    const useCase = new GoogleAuthUseCase({
+      userRepo: createMockUserRepo(),
+      sessionRepo: createMockSessionRepo(),
+      googleClientId,
+      jwtPrivateKeyPem: privateKey,
+      logger: silentLogger,
+    })
+
+    const spyFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: () => Promise.resolve('Invalid token'),
+    } as Response)
+
+    await expect(useCase.execute('invalid-id-token')).rejects.toThrow(AppError)
+
+    spyFetch.mockRestore()
+  })
+
+  it('throws UNAUTHENTICATED when Google Client ID / audience mismatch occurs', async () => {
+    const useCase = new GoogleAuthUseCase({
+      userRepo: createMockUserRepo(),
+      sessionRepo: createMockSessionRepo(),
+      googleClientId,
+      jwtPrivateKeyPem: privateKey,
+      logger: silentLogger,
+    })
+
+    const spyFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        sub: 'sub-123',
+        email: 'user@fintrack.ng',
+        email_verified: true,
+        aud: 'mismatch-client-id',
+      }),
+    } as Response)
+
+    try {
+      await useCase.execute('valid-id-token')
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError)
+      expect((err as AppError).code).toBe(ERROR_CODES.UNAUTHENTICATED)
+    }
+
+    spyFetch.mockRestore()
   })
 })

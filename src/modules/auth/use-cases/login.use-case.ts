@@ -71,6 +71,13 @@ export class LoginUseCase {
       throw invalidCredentials()
     }
 
+    if (user.passwordHash === null) {
+      // User has no password (e.g. registered via Google).
+      // Hash a dummy value to prevent timing attacks.
+      await verifyPassword('$argon2id$v=19$m=65536,t=3,p=1$dummy$dummy', password).catch(() => {})
+      throw invalidCredentials()
+    }
+
     const passwordValid = await verifyPassword(user.passwordHash, password)
     if (!passwordValid) {
       throw invalidCredentials()

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, afterAll } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { buildApp } from '../../../src/app'
 import { generateKeyPairSync } from 'node:crypto'
 import {
@@ -23,7 +23,7 @@ const { publicKey, privateKey } = generateKeyPairSync('rsa', {
 })
 
 // In-memory user store for the stubbed Prisma
-const users = new Map<string, { id: string; email: string; passwordHash: string; tier: string; createdAt: Date }>()
+const users = new Map<string, { id: string; email: string; passwordHash: string | null; googleId: string | null; tier: string; createdAt: Date }>()
 
 function createAuthPrismaStub(): PrismaClient {
   const client = {
@@ -42,20 +42,31 @@ function createAuthPrismaStub(): PrismaClient {
         Promise.resolve({ id: 'uncategorised-id', name: 'uncategorised', icon: 'circle-help' }),
     },
     user: {
-      create: ({ data }: { data: { email: string; passwordHash: string } }): Promise<unknown> => {
+      create: ({ data }: { data: { email: string; passwordHash?: string | null; googleId?: string | null } }): Promise<unknown> => {
         // Check unique constraint
         for (const user of users.values()) {
           if (user.email === data.email) {
             const error = Object.assign(new Error('Unique constraint'), { code: 'P2002' })
             return Promise.reject(error)
           }
+          if (data.googleId && user.googleId === data.googleId) {
+            const error = Object.assign(new Error('Unique constraint'), { code: 'P2002' })
+            return Promise.reject(error)
+          }
         }
         const id = randomUUID()
-        const record = { id, email: data.email, passwordHash: data.passwordHash, tier: 'FREE', createdAt: new Date() }
+        const record = {
+          id,
+          email: data.email,
+          passwordHash: data.passwordHash ?? null,
+          googleId: data.googleId ?? null,
+          tier: 'FREE',
+          createdAt: new Date(),
+        }
         users.set(id, record)
         return Promise.resolve(record)
       },
-      findUnique: ({ where }: { where: { email?: string; id?: string } }): Promise<unknown> => {
+      findUnique: ({ where }: { where: { email?: string; id?: string; googleId?: string } }): Promise<unknown> => {
         if (where.email !== undefined) {
           for (const user of users.values()) {
             if (user.email === where.email) {
@@ -69,7 +80,27 @@ function createAuthPrismaStub(): PrismaClient {
             return Promise.resolve(user)
           }
         }
+        if (where.googleId !== undefined) {
+          for (const user of users.values()) {
+            if (user.googleId === where.googleId) {
+              return Promise.resolve(user)
+            }
+          }
+        }
         return Promise.resolve(null)
+      },
+      update: ({ where, data }: { where: { id: string }; data: { googleId?: string | null; tier?: string } }): Promise<unknown> => {
+        const user = users.get(where.id)
+        if (user === undefined) {
+          return Promise.reject(new Error('User not found'))
+        }
+        const updated = {
+          ...user,
+          ...(data.googleId !== undefined ? { googleId: data.googleId } : {}),
+          ...(data.tier !== undefined ? { tier: data.tier } : {}),
+        }
+        users.set(where.id, updated)
+        return Promise.resolve(updated)
       },
     },
   }
@@ -99,6 +130,7 @@ beforeAll(async () => {
     FIELD_ENCRYPTION_KEY_BASE64: Buffer.alloc(32).toString('base64'),
     JWT_PUBLIC_KEY_PEM: publicKey,
     JWT_PRIVATE_KEY_PEM: privateKey,
+    GOOGLE_CLIENT_ID: 'google-client-id-test',
   })
 
   app = await buildApp({
@@ -182,6 +214,7 @@ describe('POST /v1/auth/login', () => {
       id: userId,
       email: 'login-test@fintrack.ng',
       passwordHash: hash,
+      googleId: null,
       tier: 'FREE',
       createdAt: new Date(),
     })
@@ -239,5 +272,74 @@ describe('POST /v1/auth/logout', () => {
     })
 
     expect(response.statusCode).toBe(401)
+  })
+})
+
+describe('POST /v1/auth/google', () => {
+  it('registers/logs in user successfully with valid Google ID token', async () => {
+    const spyFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        sub: 'google-sub-route-test-123',
+        email: 'route-test@fintrack.ng',
+        email_verified: true,
+        aud: 'google-client-id-test',
+      }),
+    } as Response)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/google',
+      payload: {
+        idToken: 'valid-mock-token',
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.success).toBe(true)
+    expect(body.data.userId).toBeTruthy()
+    expect(body.data.accessToken).toBeTruthy()
+    expect(body.data.expiresIn).toBe(900)
+
+    const cookies = response.cookies
+    const refreshCookie = cookies.find((c) => c.name === 'refreshToken')
+    expect(refreshCookie).toBeTruthy()
+    expect(refreshCookie?.httpOnly).toBe(true)
+    expect(refreshCookie?.path).toBe('/v1/auth')
+
+    spyFetch.mockRestore()
+  })
+
+  it('returns 400 for missing idToken', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/google',
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(400)
+  })
+
+  it('returns 401 for invalid/failed Google token verification', async () => {
+    const spyFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: () => Promise.resolve('Token expired'),
+    } as Response)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/google',
+      payload: {
+        idToken: 'expired-token',
+      },
+    })
+
+    expect(response.statusCode).toBe(401)
+    expect(response.json().error.code).toBe(ERROR_CODES.UNAUTHENTICATED)
+
+    spyFetch.mockRestore()
   })
 })

@@ -139,3 +139,46 @@ export const logoutJsonSchema = {
     },
   },
 } as const
+
+// ──────────────────────────────────────────────────────────────────
+// Google Auth Schema Definitions
+// ──────────────────────────────────────────────────────────────────
+
+export const googleAuthBodySchema = z.object({
+  idToken: z.string().min(1, 'Google identity token is required'),
+})
+
+export type GoogleAuthBody = z.infer<typeof googleAuthBodySchema>
+
+export const googleAuthJsonSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['idToken'],
+    properties: {
+      idToken: { type: 'string', minLength: 1 },
+    },
+  },
+  response: {
+    200: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['success', 'data', 'requestId'],
+      properties: {
+        success: { type: 'boolean', const: true },
+        data: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['userId', 'accessToken', 'expiresIn'],
+          properties: {
+            userId: { type: 'string', format: 'uuid' },
+            accessToken: { type: 'string' },
+            expiresIn: { type: 'number' },
+          },
+        },
+        requestId: { type: 'string' },
+      },
+    },
+  },
+} as const
+
