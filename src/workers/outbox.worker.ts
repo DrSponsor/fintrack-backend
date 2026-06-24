@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '../generated/prisma/client'
 import type { AppLogger } from '../core/logger'
 import type { IEventBus } from '../core/events/event-bus.interface'
@@ -29,9 +30,10 @@ export class OutboxWorker {
 
   public async publishPending(): Promise<number> {
     const lockKey = 'lock:outbox:publish'
+    const lockValue = randomUUID()
     // Attempt to acquire lock for 10 seconds (non-blocking, NX)
-    const acquired = await this.redis.set(lockKey, 'locked', 'EX', 10, 'NX')
-    if (!acquired) {
+    const acquired = await this.redis.set(lockKey, lockValue, 'EX', 10, 'NX')
+    if (acquired !== 'OK') {
       return 0
     }
 
@@ -71,7 +73,17 @@ export class OutboxWorker {
 
       return published
     } finally {
-      await this.redis.del(lockKey)
+      // Lua script ensures atomic check-and-delete to avoid releasing other worker's lock
+      await this.redis.eval(
+        `if redis.call('get', KEYS[1]) == ARGV[1] then
+           return redis.call('del', KEYS[1])
+         else
+           return 0
+         end`,
+        1,
+        lockKey,
+        lockValue
+      )
     }
   }
 }

@@ -440,3 +440,175 @@ describe('requireSubscription middleware', () => {
     await app.close()
   })
 })
+
+// ──────────────────────────────────────────────────────────────────
+// rateLimitPlugin middleware tests
+// ──────────────────────────────────────────────────────────────────
+
+describe('rateLimitPlugin middleware', () => {
+  it('allows requests within rate limit', async () => {
+    const { app } = await buildTestApp()
+    
+    app.get('/test/limited', {
+      config: { rateLimit: { max: 2, window: 60 } }
+    }, () => ({ ok: true }))
+
+    let response = await app.inject({ method: 'GET', url: '/test/limited' })
+    expect(response.statusCode).toBe(200)
+
+    response = await app.inject({ method: 'GET', url: '/test/limited' })
+    expect(response.statusCode).toBe(200)
+
+    await app.close()
+  })
+
+  it('blocks requests exceeding rate limit with 429', async () => {
+    const { app } = await buildTestApp()
+
+    app.get('/test/limited', {
+      config: { rateLimit: { max: 2, window: 60 } }
+    }, () => ({ ok: true }))
+
+    let response = await app.inject({ method: 'GET', url: '/test/limited' })
+    expect(response.statusCode).toBe(200)
+
+    response = await app.inject({ method: 'GET', url: '/test/limited' })
+    expect(response.statusCode).toBe(200)
+
+    response = await app.inject({ method: 'GET', url: '/test/limited' })
+    expect(response.statusCode).toBe(429)
+    expect(response.headers['retry-after']).toBe('60')
+    await app.close()
+  })
+
+  it('falls back to local rate limiting if Redis fails or times out', async () => {
+    const fakeRedis = new FakeRedis()
+    fakeRedis.eval = () => new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Redis slow')), 1000)
+    })
+
+    const { app } = await buildTestApp(fakeRedis)
+
+    app.get('/test/limited-fallback', {
+      config: { rateLimit: { max: 2, window: 60 } }
+    }, () => ({ ok: true }))
+
+    let response = await app.inject({ method: 'GET', url: '/test/limited-fallback' })
+    expect(response.statusCode).toBe(200)
+
+    response = await app.inject({ method: 'GET', url: '/test/limited-fallback' })
+    expect(response.statusCode).toBe(200)
+
+    response = await app.inject({ method: 'GET', url: '/test/limited-fallback' })
+    expect(response.statusCode).toBe(429)
+    await app.close()
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────
+// idempotencyPlugin middleware tests
+// ──────────────────────────────────────────────────────────────────
+
+describe('idempotencyPlugin middleware', () => {
+  it('requires Idempotency-Key header for financial mutations', async () => {
+    const { app } = await buildTestApp()
+
+    app.post('/test/mutation', {
+      config: { financialMutation: true }
+    }, () => ({ ok: true }))
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/test/mutation',
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error.code).toBe(ERROR_CODES.IDEMPOTENCY_REQUIRED)
+    await app.close()
+  })
+
+  it('serves cached response on duplicate request and releases lock', async () => {
+    const { app, redis } = await buildTestApp()
+    const token = await createToken(basePayload())
+
+    let callCount = 0
+    app.post('/test/mutation', {
+      config: { financialMutation: true }
+    }, () => {
+      callCount++
+      return { callCount }
+    })
+
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'idempotency-key': 'test-key-123',
+    }
+
+    // First request
+    let response = await app.inject({
+      method: 'POST',
+      url: '/test/mutation',
+      headers,
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ callCount: 1 })
+    console.log("REDIS VALUES:", Array.from((redis as any).values.entries()))
+
+    // Second request should get cached response
+    response = await app.inject({
+      method: 'POST',
+      url: '/test/mutation',
+      headers,
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ callCount: 1 })
+    expect(callCount).toBe(1)
+
+    // Verify lock is deleted
+    const keys = Array.from((redis as any).values.keys()) as string[]
+    const lockKeys = keys.filter((k) => k.startsWith('idempotency:lock:'))
+    expect(lockKeys.length).toBe(0)
+
+    await app.close()
+  })
+
+  it('does not cache 5xx errors and releases lock for retry', async () => {
+    const { app } = await buildTestApp()
+    const token = await createToken(basePayload())
+
+    let callCount = 0
+    app.post('/test/mutation-fail', {
+      config: { financialMutation: true }
+    }, () => {
+      callCount++
+      if (callCount === 1) {
+        throw new Error('Database failure')
+      }
+      return { callCount }
+    })
+
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'idempotency-key': 'test-key-fail',
+    }
+
+    // First request fails
+    let response = await app.inject({
+      method: 'POST',
+      url: '/test/mutation-fail',
+      headers,
+    })
+    expect(response.statusCode).toBe(500)
+
+    // Second request should succeed because lock was released and response was not cached
+    response = await app.inject({
+      method: 'POST',
+      url: '/test/mutation-fail',
+      headers,
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ callCount: 2 })
+
+    await app.close()
+  })
+})

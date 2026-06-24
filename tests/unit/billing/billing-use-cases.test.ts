@@ -87,6 +87,7 @@ function createMockUserRepo(user: UserRecord | null = null): IUserRepository {
 function createMockBillingProvider(): IBillingProvider {
   return {
     providerName: 'paystack',
+    signatureHeaderName: 'x-paystack-signature',
     createCustomer: vi.fn().mockResolvedValue('CUS_123'),
     createCheckoutUrl: vi.fn().mockResolvedValue('https://checkout.paystack.com/mock'),
     verifyWebhookSignature: vi.fn().mockReturnValue(true),
@@ -202,7 +203,7 @@ describe('Subscription Service & Workers', () => {
     it('upserts active subscription and updates user tier to PRO', async () => {
       const subscriptionRepo = createMockSubscriptionRepo()
       const userRepo = createMockUserRepo()
-      const service = new SubscriptionService({ subscriptionRepo, userRepo, redis: mockRedis })
+      const service = new SubscriptionService({ subscriptionRepo, userRepo, redis: mockRedis, providerName: 'PAYSTACK' })
 
       const event = {
         providerEventId: 'evt-1',
@@ -233,7 +234,7 @@ describe('Subscription Service & Workers', () => {
       const sub = makeSubscriptionRecord()
       const subscriptionRepo = createMockSubscriptionRepo({ findBySubscriptionIdResult: sub })
       const userRepo = createMockUserRepo()
-      const service = new SubscriptionService({ subscriptionRepo, userRepo, redis: mockRedis })
+      const service = new SubscriptionService({ subscriptionRepo, userRepo, redis: mockRedis, providerName: 'PAYSTACK' })
 
       const event = {
         providerEventId: 'evt-2',
@@ -262,7 +263,7 @@ describe('Subscription Service & Workers', () => {
         currentPeriodEnd: new Date('2026-06-18T12:00:00.000Z'),
       })
       const subscriptionRepo = createMockSubscriptionRepo({ findActiveSubscriptionsResult: [sub] })
-      const service = new SubscriptionService({ subscriptionRepo, userRepo: createMockUserRepo(), redis: mockRedis })
+      const service = new SubscriptionService({ subscriptionRepo, userRepo: createMockUserRepo(), redis: mockRedis, providerName: 'PAYSTACK' })
       const billingProvider = createMockBillingProvider()
       
       // Paystack returns a new period end
@@ -288,7 +289,7 @@ describe('Subscription Service & Workers', () => {
         providerSubscriptionId: 'SUB_123',
       })
       const subscriptionRepo = createMockSubscriptionRepo({ findActiveSubscriptionsResult: [sub] })
-      const service = new SubscriptionService({ subscriptionRepo, userRepo: createMockUserRepo(), redis: mockRedis })
+      const service = new SubscriptionService({ subscriptionRepo, userRepo: createMockUserRepo(), redis: mockRedis, providerName: 'PAYSTACK' })
       const billingProvider = createMockBillingProvider()
 
       // Paystack returns cancelled

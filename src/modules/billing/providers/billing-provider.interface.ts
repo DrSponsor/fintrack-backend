@@ -25,6 +25,7 @@ export interface NormalizedBillingEvent {
 
 export interface IBillingProvider {
   readonly providerName: 'paystack' | 'monnify'
+  readonly signatureHeaderName: string
 
   createCustomer(user: { id: string; email: string }): Promise<string>
 

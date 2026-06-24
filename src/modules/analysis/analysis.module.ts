@@ -93,8 +93,9 @@ const analysisModule: FastifyPluginCallback = (fastify, _options, done) => {
   // 4. Wire the transaction event listener for automatic cache invalidation and recomputation
   fastify.eventBus.subscribe('transaction.created', async (payload) => {
     try {
-      // Fetch the transaction using the read replica to extract the transactionDate
-      const tx = await fastify.db.read.transaction.findFirst({
+      // Fetch the transaction using the primary database client to extract the transactionDate
+      // (Using primary instead of read replica to bypass replication lag issues for read-after-write)
+      const tx = await fastify.db.primary.transaction.findFirst({
         where: { id: payload.transactionId },
         select: { transactionDate: true },
       })

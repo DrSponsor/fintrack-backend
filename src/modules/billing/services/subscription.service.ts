@@ -1,4 +1,5 @@
 import type { Redis } from 'ioredis'
+import type { BillingProvider } from '../../../generated/prisma/client'
 import type { NormalizedBillingEvent } from '../providers/billing-provider.interface'
 import type { ISubscriptionRepository } from '../repositories/billing.repo'
 import type { IUserRepository } from '../../auth/repositories/user.repo'
@@ -7,17 +8,20 @@ export type SubscriptionServiceDeps = {
   readonly subscriptionRepo: ISubscriptionRepository
   readonly userRepo: IUserRepository
   readonly redis: Redis
+  readonly providerName: BillingProvider
 }
 
 export class SubscriptionService {
   private readonly subscriptionRepo: ISubscriptionRepository
   private readonly userRepo: IUserRepository
   private readonly redis: Redis
+  private readonly providerName: BillingProvider
 
   public constructor(deps: SubscriptionServiceDeps) {
     this.subscriptionRepo = deps.subscriptionRepo
     this.userRepo = deps.userRepo
     this.redis = deps.redis
+    this.providerName = deps.providerName
   }
 
   public async upsert(event: NormalizedBillingEvent): Promise<void> {
@@ -27,10 +31,10 @@ export class SubscriptionService {
     const providerCustomerId = (event.metadata.providerCustomerId as string | undefined) || 'unknown'
     const providerSubscriptionId = event.providerSubscriptionId || 'unknown'
 
-    // Save/update subscription record in DB
+    // Save/update subscription record in DB — provider is injected at construction
     await this.subscriptionRepo.upsert({
       userId: event.userId,
-      provider: 'PAYSTACK',
+      provider: this.providerName,
       providerCustomerId,
       providerSubscriptionId,
       providerPlanId: planId,

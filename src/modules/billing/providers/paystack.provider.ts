@@ -47,6 +47,7 @@ interface PaystackSubscriptionDetailResponse {
 
 export class PaystackProvider implements IBillingProvider {
   public readonly providerName = 'paystack' as const
+  public readonly signatureHeaderName = 'x-paystack-signature' as const
   private readonly secretKey: string
   private readonly breaker: CircuitBreaker<[string, RequestInit], any>
 

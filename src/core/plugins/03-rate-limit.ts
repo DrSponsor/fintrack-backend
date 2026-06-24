@@ -41,12 +41,33 @@ export const rateLimitPlugin: FastifyPluginCallback = fp((fastify, _options, don
     const localKey = `rate:${userOrIp}:${Math.floor(now / (windowSeconds * 1_000))}`
 
     try {
-      await ensureRedisConnected(fastify.redis)
-      const redisKey = `rl:${localKey}`
-      const count = await fastify.redis.incr(redisKey)
-      if (count === 1) {
-        await fastify.redis.expire(redisKey, windowSeconds)
+      const redisAction = async (): Promise<number> => {
+        await ensureRedisConnected(fastify.redis)
+        const redisKey = `rl:${localKey}`
+        const result = await fastify.redis.eval(
+          `local current = redis.call('incr', KEYS[1])
+           if tonumber(current) == 1 then
+             redis.call('expire', KEYS[1], ARGV[1])
+           end
+           return current`,
+          1,
+          redisKey,
+          windowSeconds.toString()
+        )
+        return Number(result)
       }
+
+      let timeoutId: NodeJS.Timeout | undefined
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Redis timeout')), 500)
+      })
+
+      const count = await Promise.race([redisAction(), timeoutPromise]).finally(() => {
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId)
+        }
+      })
+
       if (count > limit) {
         reply.header('retry-after', windowSeconds.toString())
         throw new AppError(ERROR_CODES.RATE_LIMITED, 'Rate limit exceeded', 429)

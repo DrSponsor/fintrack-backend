@@ -116,6 +116,26 @@ export class FakeRedis {
   public ttl(_key: string): Promise<number> {
     return Promise.resolve(3600)
   }
+
+  public eval(script: string, numkeys: number, ...args: readonly (string | number)[]): Promise<unknown> {
+    if (script.includes("redis.call('incr'")) {
+      const key = args[0] as string
+      const count = (this.counters.get(key) ?? 0) + 1
+      this.counters.set(key, count)
+      return Promise.resolve(count)
+    }
+    if (script.includes("redis.call('get'")) {
+      const key = args[0] as string
+      const expectedValue = args[1] as string
+      const actualValue = this.values.get(key)
+      if (actualValue === expectedValue) {
+        this.values.delete(key)
+        return Promise.resolve(1)
+      }
+      return Promise.resolve(0)
+    }
+    return Promise.reject(new Error(`eval not mocked for script: ${script}`))
+  }
 }
 
 function createPrismaClientStub(): PrismaClient {

@@ -75,7 +75,7 @@ export const idempotencyPlugin: FastifyPluginCallback = fp((fastify, _options, d
         throw new AppError(ERROR_CODES.INTERNAL, 'Invalid cached idempotency response', 500)
       }
       reply.code(parsed.statusCode).type(parsed.contentType).send(parsed.payload)
-      return
+      return reply
     }
 
     const inserted = await fastify.redis.set(lockKey, 'processing', 'EX', 24 * 60 * 60, 'NX')
@@ -86,6 +86,7 @@ export const idempotencyPlugin: FastifyPluginCallback = fp((fastify, _options, d
     request.idempotency = {
       key: keyHeader,
       cacheKey: responseKey,
+      lockKey,
       state: 'registered',
     }
   })
@@ -104,6 +105,14 @@ export const idempotencyPlugin: FastifyPluginCallback = fp((fastify, _options, d
 
     await fastify.redis.set(request.idempotency.cacheKey, JSON.stringify(record), 'EX', 24 * 60 * 60)
     return payload
+  })
+
+  fastify.addHook('onResponse', async (request, reply) => {
+    if (request.idempotency?.lockKey) {
+      await fastify.redis.del(request.idempotency.lockKey).catch((error: unknown) => {
+        fastify.log.error({ err: error, lockKey: request.idempotency?.lockKey }, 'failed to delete idempotency lock key')
+      })
+    }
   })
   done()
 }, {
