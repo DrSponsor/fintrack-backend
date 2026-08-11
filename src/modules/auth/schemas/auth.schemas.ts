@@ -50,10 +50,11 @@ export const registerJsonSchema = {
         data: {
           type: 'object',
           additionalProperties: false,
-          required: ['userId', 'accessToken', 'expiresIn'],
+          required: ['userId', 'accessToken', 'refreshToken', 'expiresIn'],
           properties: {
             userId: { type: 'string', format: 'uuid' },
             accessToken: { type: 'string' },
+            refreshToken: { type: 'string' },
             expiresIn: { type: 'number' },
           },
         },
@@ -83,9 +84,10 @@ export const loginJsonSchema = {
         data: {
           type: 'object',
           additionalProperties: false,
-          required: ['accessToken', 'expiresIn'],
+          required: ['accessToken', 'refreshToken', 'expiresIn'],
           properties: {
             accessToken: { type: 'string' },
+            refreshToken: { type: 'string' },
             expiresIn: { type: 'number' },
           },
         },
@@ -106,9 +108,10 @@ export const refreshJsonSchema = {
         data: {
           type: 'object',
           additionalProperties: false,
-          required: ['accessToken', 'expiresIn'],
+          required: ['accessToken', 'refreshToken', 'expiresIn'],
           properties: {
             accessToken: { type: 'string' },
+            refreshToken: { type: 'string' },
             expiresIn: { type: 'number' },
           },
         },
