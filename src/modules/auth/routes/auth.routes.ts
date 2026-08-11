@@ -96,10 +96,12 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
       maxAge: 30 * 24 * 60 * 60,
     })
 
+    // Include refreshToken in body for mobile clients
     return reply.code(201).send(successEnvelope(
       {
         userId: result.userId,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
       },
       request.requestId,
@@ -124,9 +126,11 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
       maxAge: 30 * 24 * 60 * 60,
     })
 
+    // Include refreshToken in body for mobile clients
     return reply.code(200).send(successEnvelope(
       {
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
       },
       request.requestId,
@@ -134,6 +138,10 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
   })
 
   // ── POST /v1/auth/refresh ──────────────────────────────────────
+  // Accepts refresh token from EITHER:
+  //   1. httpOnly cookie (web clients)
+  //   2. Request body `{ refreshToken }` (mobile clients — no cookie jar)
+  // This is standard practice for multi-platform auth (Spotify, Revolut, etc.)
   fastify.post('/v1/auth/refresh', {
     schema: refreshJsonSchema,
     preHandler: [authenticate],
@@ -142,7 +150,9 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
       throw unauthenticated('Session identifier missing from token')
     }
 
-    const refreshToken = request.cookies.refreshToken
+    // Try cookie first (web), fall back to body (mobile)
+    const body = request.body as { refreshToken?: string } | undefined
+    const refreshToken = request.cookies.refreshToken ?? body?.refreshToken
     if (refreshToken === undefined || refreshToken.length === 0) {
       throw unauthenticated('Refresh token missing')
     }
@@ -153,6 +163,7 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
       refreshToken,
     )
 
+    // Set cookie for web clients (mobile clients ignore this)
     reply.setCookie('refreshToken', result.refreshToken, {
       path: '/v1/auth',
       httpOnly: true,
@@ -161,9 +172,11 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
       maxAge: 30 * 24 * 60 * 60,
     })
 
+    // Include refreshToken in body for mobile clients
     return reply.code(200).send(successEnvelope(
       {
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
       },
       request.requestId,
