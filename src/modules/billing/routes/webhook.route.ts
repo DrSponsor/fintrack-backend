@@ -1,11 +1,11 @@
 import { Readable } from 'node:stream'
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../../types/fastify'
 import type { IBillingProvider } from '../providers/billing-provider.interface'
 import type { IBillingRepository } from '../repositories/billing.repo'
 import { ProcessWebhookUseCase } from '../use-cases/process-webhook.use-case'
 
 export function registerWebhookRoute(
-  fastify: FastifyInstance<any, any, any, any, any>,
+  fastify: AppFastifyInstance,
   deps: { readonly billingProvider: IBillingProvider; readonly billingRepo: IBillingRepository }
 ): void {
   const useCase = new ProcessWebhookUseCase({
@@ -17,7 +17,7 @@ export function registerWebhookRoute(
   fastify.post('/v1/billing/webhook', {
     // Route-level preParsing hook to capture the raw body for signature verification
     preParsing: [
-      async (request, _reply, payload) => {
+      async (request, _reply, payload): Promise<Readable> => {
         const chunks: Buffer[] = []
         for await (const chunk of payload) {
           chunks.push(chunk)

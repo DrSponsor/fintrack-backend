@@ -8,7 +8,6 @@ import { unauthenticated } from '../src/core/errors/factories'
 import {
   createDatabaseClientsStub,
   createQueueRegistryStub,
-  createRedisStub,
   createTestConfig,
   FakeRedis,
 } from './helpers/fakes'
@@ -280,7 +279,7 @@ describe('ownership middleware', () => {
     const userId = '00000000-0000-0000-0000-000000000001'
     const token = await createToken(basePayload({ sub: userId }))
 
-    const loader = async (_id: string) => ({ userId })
+    const loader = (_id: string) => Promise.resolve({ userId })
 
     app.get('/test/accounts/:id', {
       preHandler: [authenticate, ownership('id', loader)],
@@ -304,7 +303,7 @@ describe('ownership middleware', () => {
     const token = await createToken(basePayload({ sub: '00000000-0000-0000-0000-000000000001' }))
 
     // Resource belongs to a different user
-    const loader = async (_id: string) => ({ userId: '00000000-0000-0000-0000-000000000099' })
+    const loader = (_id: string) => Promise.resolve({ userId: '00000000-0000-0000-0000-000000000099' })
 
     app.get('/test/accounts/:id', {
       preHandler: [authenticate, ownership('id', loader)],
@@ -329,7 +328,7 @@ describe('ownership middleware', () => {
 
     const token = await createToken(basePayload())
 
-    const loader = async (_id: string) => null
+    const loader = (_id: string) => Promise.resolve(null)
 
     app.get('/test/accounts/:id', {
       preHandler: [authenticate, ownership('id', loader)],
@@ -552,7 +551,6 @@ describe('idempotencyPlugin middleware', () => {
     })
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ callCount: 1 })
-    console.log("REDIS VALUES:", Array.from((redis as any).values.entries()))
 
     // Second request should get cached response
     response = await app.inject({
@@ -565,7 +563,7 @@ describe('idempotencyPlugin middleware', () => {
     expect(callCount).toBe(1)
 
     // Verify lock is deleted
-    const keys = Array.from((redis as any).values.keys()) as string[]
+    const keys = Array.from<string>((redis as any).values.keys())
     const lockKeys = keys.filter((k) => k.startsWith('idempotency:lock:'))
     expect(lockKeys.length).toBe(0)
 

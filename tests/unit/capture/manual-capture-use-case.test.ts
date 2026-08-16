@@ -3,8 +3,8 @@ import { ManualCaptureUseCase } from '../../../src/modules/capture/manual/servic
 import type { ITransactionRepository, TransactionRecord } from '../../../src/modules/transactions/repositories/transaction.repo'
 import type { IAccountRepository, AccountRecord } from '../../../src/modules/accounts/repositories/account.repo'
 import { NormalizerService } from '../../../src/modules/transactions/services/normalizer.service'
-import { CategorizerService } from '../../../src/modules/transactions/services/categorizer.service'
-import { DeduplicatorService } from '../../../src/modules/transactions/services/deduplicator.service'
+import type { CategorizerService } from '../../../src/modules/transactions/services/categorizer.service'
+import type { DeduplicatorService } from '../../../src/modules/transactions/services/deduplicator.service'
 import { AppError } from '../../../src/core/errors/AppError'
 import { randomUUID } from 'node:crypto'
 

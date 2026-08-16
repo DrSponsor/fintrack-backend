@@ -1,10 +1,10 @@
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../../types/fastify'
 import { ListCategoriesUseCase } from '../use-cases/list-categories.use-case'
 import { PrismaCategoryRepository } from '../repositories/category.repo'
 import { listCategoriesJsonSchema } from '../schemas/category.schemas'
 import { successEnvelope } from '../../../core/http/envelope'
 
-export function registerCategoryRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
+export function registerCategoryRoutes(fastify: AppFastifyInstance): void {
   const categoryRepo = new PrismaCategoryRepository(fastify.db.primary)
   const listCategoriesUseCase = new ListCategoriesUseCase({ categoryRepo })
 

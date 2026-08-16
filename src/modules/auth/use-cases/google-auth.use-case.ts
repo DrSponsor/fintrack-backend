@@ -36,7 +36,7 @@ export class GoogleAuthUseCase {
   private readonly googleClientId: string | undefined
   private readonly jwtPrivateKeyPem: string
   private readonly logger: AppLogger
-  private readonly breaker: CircuitBreaker<[string], any>
+  private readonly breaker: CircuitBreaker<[string], unknown>
 
   public constructor(deps: GoogleAuthUseCaseDeps) {
     this.userRepo = deps.userRepo
@@ -56,7 +56,7 @@ export class GoogleAuthUseCase {
     )
   }
 
-  private async fetchTokenInfo(idToken: string): Promise<any> {
+  private async fetchTokenInfo(idToken: string): Promise<unknown> {
     const url = `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
     const response = await fetch(url)
     if (!response.ok) {
@@ -72,7 +72,7 @@ export class GoogleAuthUseCase {
       throw dependencyUnavailable('Google authentication service is currently unavailable')
     }
 
-    let tokenInfo: any
+    let tokenInfo: unknown
     try {
       tokenInfo = await this.breaker.fire(idToken)
     } catch (err) {
@@ -158,10 +158,15 @@ export class GoogleAuthUseCase {
   }
 }
 
+// Prisma 7 throws PrismaClientKnownRequestError with code P2002 specifically
+// for a unique constraint violation — checking `name` alone (as an `||`
+// alternative) would match every other Prisma error code too (e.g. P2022
+// missing column), silently misreporting unrelated database errors as a
+// duplicate Google account link.
 function isUniqueConstraintError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) {
     return false
   }
-  const err = error as { code?: string; name?: string }
-  return err.code === 'P2002' || err.name === 'PrismaClientKnownRequestError'
+  const err = error as { code?: string }
+  return err.code === 'P2002'
 }

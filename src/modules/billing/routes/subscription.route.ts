@@ -1,12 +1,12 @@
-import type { FastifyInstance } from 'fastify'
-import { authenticate } from '../../../core/middleware/authenticate'
+import type { AppFastifyInstance } from '../../../types/fastify'
+import { authenticate, requireUser } from '../../../core/middleware/authenticate'
 import { GetSubscriptionStatusUseCase } from '../use-cases/get-subscription-status.use-case'
 import { subscriptionStatusJsonSchema } from '../schemas/billing.schemas'
 import { successEnvelope } from '../../../core/http/envelope'
 import type { ISubscriptionRepository } from '../repositories/billing.repo'
 
 export function registerSubscriptionRoute(
-  fastify: FastifyInstance<any, any, any, any, any>,
+  fastify: AppFastifyInstance,
   deps: { readonly subscriptionRepo: ISubscriptionRepository }
 ): void {
   const getSubscriptionStatusUseCase = new GetSubscriptionStatusUseCase(deps)
@@ -15,7 +15,7 @@ export function registerSubscriptionRoute(
     schema: subscriptionStatusJsonSchema,
     preHandler: [authenticate],
   }, async (request, reply) => {
-    const result = await getSubscriptionStatusUseCase.execute(request.user!.sub)
+    const result = await getSubscriptionStatusUseCase.execute(requireUser(request).sub)
     const formatted = {
       status: result.status,
       currentPeriodEnd: result.currentPeriodEnd ? result.currentPeriodEnd.toISOString() : null,

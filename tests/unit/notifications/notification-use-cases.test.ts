@@ -4,7 +4,7 @@ import { UnregisterTokenUseCase } from '../../../src/modules/notifications/use-c
 import { GetPreferencesUseCase } from '../../../src/modules/notifications/use-cases/get-preferences.use-case'
 import { UpdatePreferencesUseCase } from '../../../src/modules/notifications/use-cases/update-preferences.use-case'
 import { NotificationService } from '../../../src/modules/notifications/services/notification.service'
-import type { INotificationRepository, DeviceTokenRecord, NotificationPreferenceRecord } from '../../../src/modules/notifications/repositories/notification.repo'
+import type { INotificationRepository, NotificationPreferenceRecord } from '../../../src/modules/notifications/repositories/notification.repo'
 import type { IPushProvider } from '../../../src/modules/notifications/providers/fcm.provider'
 import type { IEmailProvider } from '../../../src/modules/notifications/providers/postmark.provider'
 import type { IUserRepository } from '../../../src/modules/auth/repositories/user.repo'
@@ -30,7 +30,7 @@ function createMockNotificationRepo(overrides: Partial<INotificationRepository> 
       platform: 'ANDROID',
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as DeviceTokenRecord),
+    }),
     unregisterToken: vi.fn().mockResolvedValue(undefined),
     getTokensByUserId: vi.fn().mockResolvedValue([]),
     getPreferences: vi.fn().mockResolvedValue({
@@ -43,7 +43,7 @@ function createMockNotificationRepo(overrides: Partial<INotificationRepository> 
       monthlyReports: true,
       createdAt: new Date(),
       updatedAt: new Date(),
-    } as NotificationPreferenceRecord),
+    }),
     updatePreferences: vi.fn().mockImplementation((userId, data) => Promise.resolve({
       id: randomUUID(),
       userId,

@@ -1,11 +1,11 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyInstance, AppFastifyPluginCallback } from '../../types/fastify'
 
 function shouldAudit(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE'
 }
 
-export const auditPlugin: FastifyPluginCallback = fp((fastify, _options, done) => {
+export const auditPlugin: AppFastifyPluginCallback = fp((fastify: AppFastifyInstance, _options, done) => {
   fastify.addHook('onSend', async (request, _reply, payload) => {
     if (!shouldAudit(request.method) || request.user === undefined) {
       return payload

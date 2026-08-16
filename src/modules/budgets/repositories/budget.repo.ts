@@ -26,6 +26,7 @@ export interface IBudgetRepository {
     periodType: 'WEEKLY' | 'MONTHLY',
   ): Promise<readonly BudgetRecord[]>
   findByCategory(userId: string, categoryId: string): Promise<readonly BudgetRecord[]>
+  update(id: string, data: { readonly limitKobo: bigint }): Promise<BudgetRecord>
   delete(id: string): Promise<void>
   createAlert(transactionId: string, budgetId: string, userId: string): Promise<void>
   getAlertCount(transactionId: string, budgetId: string): Promise<number>
@@ -52,7 +53,7 @@ export class PrismaBudgetRepository implements IBudgetRepository {
         userId: data.userId,
         categoryId: data.categoryId,
         limitKobo: data.limitKobo,
-        periodType: data.periodType as PeriodType,
+        periodType: data.periodType,
       },
     })
     return this.toDomain(row)
@@ -82,7 +83,7 @@ export class PrismaBudgetRepository implements IBudgetRepository {
       where: {
         userId,
         categoryId,
-        periodType: periodType as PeriodType,
+        periodType: periodType,
       },
     })
     return rows.map((r) => this.toDomain(r))
@@ -96,6 +97,14 @@ export class PrismaBudgetRepository implements IBudgetRepository {
       },
     })
     return rows.map((r) => this.toDomain(r))
+  }
+
+  public async update(id: string, data: { readonly limitKobo: bigint }): Promise<BudgetRecord> {
+    const row = await this.prisma.budget.update({
+      where: { id },
+      data: { limitKobo: data.limitKobo },
+    })
+    return this.toDomain(row)
   }
 
   public async delete(id: string): Promise<void> {
@@ -124,9 +133,10 @@ export class PrismaBudgetRepository implements IBudgetRepository {
           userId,
         },
       })
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Check for PostgreSQL unique constraint error code (P2002 in Prisma)
-      if (error.code === 'P2002') {
+      const code = (error as { code?: string }).code
+      if (code === 'P2002') {
         return
       }
       throw error
@@ -178,7 +188,7 @@ export class PrismaBudgetRepository implements IBudgetRepository {
       userId: row.userId,
       categoryId: row.categoryId,
       limitKobo: row.limitKobo.toString(),
-      periodType: row.periodType as 'WEEKLY' | 'MONTHLY',
+      periodType: row.periodType,
       createdAt: row.createdAt,
     }
   }

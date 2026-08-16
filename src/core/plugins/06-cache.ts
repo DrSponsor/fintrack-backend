@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyInstance, FastifyPluginCallback } from 'fastify'
+import type { AppFastifyInstance } from '../../types/fastify'
 import type { AppConfig } from '../../config'
 import { CacheManager } from '../cache/cache-manager'
 import { eventBus as defaultEventBus } from '../events/bus'
@@ -14,7 +14,7 @@ export type CachePluginOptions = {
   readonly queues?: QueueRegistry
 }
 
-export const cachePlugin = fp((fastify: FastifyInstance<any, any, any, any, any>, options: CachePluginOptions, done) => {
+export const cachePlugin = fp((fastify: AppFastifyInstance, options: CachePluginOptions, done) => {
   fastify.decorate('cache', new CacheManager(fastify.redis))
   fastify.decorate('eventBus', options.eventBus ?? defaultEventBus)
 

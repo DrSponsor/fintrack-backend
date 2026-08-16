@@ -1,8 +1,8 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyPluginCallback } from '../../types/fastify'
 import { registerCategoryRoutes } from './routes/category.routes'
 
-const categoriesModule: FastifyPluginCallback = (fastify, _options, done) => {
+const categoriesModule: AppFastifyPluginCallback = (fastify, _options, done) => {
   registerCategoryRoutes(fastify)
   done()
 }

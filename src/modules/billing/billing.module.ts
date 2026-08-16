@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyPluginCallback } from '../../types/fastify'
 import { registerCheckoutRoute } from './routes/checkout.route'
 import { registerCancelRoute } from './routes/cancel.route'
 import { registerSubscriptionRoute } from './routes/subscription.route'
@@ -11,11 +11,10 @@ import { SubscriptionService } from './services/subscription.service'
 import { BillingService } from './services/billing.service'
 import { BillingWebhookWorker } from './workers/webhook.worker'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
-import type { AppLogger } from '../../core/logger'
 
 // Note: Ensure correct relative paths: routes/checkout.route, etc.
-const billingModule: FastifyPluginCallback = (fastify, _options, done) => {
-  const logger = fastify.log as unknown as AppLogger
+const billingModule: AppFastifyPluginCallback = (fastify, _options, done) => {
+  const logger = fastify.log
   const appConfig = fastify.appConfig
 
   // 1. Instantiate Core billing dependencies

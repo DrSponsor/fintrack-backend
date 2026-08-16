@@ -16,6 +16,21 @@ export interface IPushProvider {
   sendPush(payload: PushMessagePayload): Promise<void>
 }
 
+type FcmMessage = {
+  token: string
+  notification?: { title: string | undefined; body: string | undefined }
+  data?: Record<string, string>
+  apns?: {
+    payload: { aps: { 'content-available': number } }
+    headers: { 'apns-push-type': string; 'apns-priority': string }
+  }
+}
+
+type GoogleOAuthTokenResponse = {
+  readonly access_token?: string
+  readonly expires_in?: number
+}
+
 export class FcmProvider implements IPushProvider {
   private readonly projectId?: string | undefined
   private readonly clientEmail?: string | undefined
@@ -82,7 +97,7 @@ export class FcmProvider implements IPushProvider {
       const url = `https://fcm.googleapis.com/v1/projects/${this.projectId}/messages:send`
 
       // Format payload according to FCM HTTP v1 spec
-      const fcmMessage: any = {
+      const fcmMessage: FcmMessage = {
         token: payload.token,
       }
 
@@ -182,7 +197,7 @@ export class FcmProvider implements IPushProvider {
         throw new Error(`OAuth token fetch failed: ${response.status} - ${text}`)
       }
 
-      const data: any = await response.json()
+      const data = await response.json() as GoogleOAuthTokenResponse
       if (!data.access_token || !data.expires_in) {
         throw new Error('Invalid OAuth response structure')
       }

@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyInstance, FastifyPluginCallback } from 'fastify'
+import type { AppFastifyInstance } from '../../types/fastify'
 import type { AppConfig } from '../../config'
 import { createPrismaClients, disconnectDatabase } from '../../config/database'
 import type { DatabaseClients } from '../../config/database'
@@ -9,7 +9,7 @@ export type DatabasePluginOptions = {
   readonly clients?: DatabaseClients
 }
 
-export const databasePlugin = fp((fastify: FastifyInstance<any, any, any, any, any>, options: DatabasePluginOptions, done) => {
+export const databasePlugin = fp((fastify: AppFastifyInstance, options: DatabasePluginOptions, done) => {
   const clients = options.clients ?? createPrismaClients(options.appConfig)
   fastify.decorate('db', clients)
 

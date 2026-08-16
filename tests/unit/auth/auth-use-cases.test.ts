@@ -10,12 +10,13 @@ import { hashPassword } from '../../../src/core/crypto/hashing'
 import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { AppError } from '../../../src/core/errors/AppError'
 import { ERROR_CODES } from '../../../src/core/errors/codes'
+import { verifyAccessToken } from '../../../src/core/crypto/tokens'
 
 // ──────────────────────────────────────────────────────────────────
 // Shared test infrastructure
 // ──────────────────────────────────────────────────────────────────
 
-const { privateKey } = generateKeyPairSync('rsa', {
+const { privateKey, publicKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
   publicKeyEncoding: { type: 'spki', format: 'pem' },
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
@@ -314,6 +315,37 @@ describe('RefreshUseCase', () => {
     expect(result.refreshToken).toBe('new-rt')
     expect(result.sessionId).toBe(newSessionId)
     expect(sessionRepo.rotate).toHaveBeenCalledWith(userId, oldSessionId, 'old-rt')
+  })
+
+  it('includes the sid claim in the refreshed access token, so it can itself be refreshed again', async () => {
+    // Regression test: the refresh route (auth.routes.ts) requires
+    // request.user.sid on every call to POST /v1/auth/refresh. If the
+    // access token issued BY a refresh omits `sid` — as this use case
+    // once did — a client can refresh exactly once per login before
+    // hitting a dead end, forcing a full re-login roughly every 15
+    // minutes (the access token lifetime). Every access token this use
+    // case issues must carry the same sid the next refresh call needs.
+    const userId = randomUUID()
+    const newSessionId = randomUUID()
+
+    const sessionRepo = createMockSessionRepo({
+      rotate: vi.fn().mockResolvedValue({ sessionId: newSessionId, refreshToken: 'new-rt' }),
+    })
+    const userRepo = createMockUserRepo({
+      findById: vi.fn().mockResolvedValue(makeUserRecord({ id: userId })),
+    })
+
+    const useCase = new RefreshUseCase({
+      userRepo,
+      sessionRepo,
+      jwtPrivateKeyPem: privateKey,
+      logger: silentLogger,
+    })
+
+    const result = await useCase.execute(userId, randomUUID(), 'old-rt')
+
+    const decoded = await verifyAccessToken(result.accessToken, publicKey)
+    expect(decoded.sid).toBe(newSessionId)
   })
 
   it('throws TOKEN_REVOKED when rotation fails (reuse detected)', async () => {

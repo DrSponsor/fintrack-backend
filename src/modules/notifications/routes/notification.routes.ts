@@ -1,10 +1,10 @@
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../../types/fastify'
 import { PrismaNotificationRepository } from '../repositories/notification.repo'
 import { RegisterTokenUseCase } from '../use-cases/register-token.use-case'
 import { UnregisterTokenUseCase } from '../use-cases/unregister-token.use-case'
 import { GetPreferencesUseCase } from '../use-cases/get-preferences.use-case'
 import { UpdatePreferencesUseCase } from '../use-cases/update-preferences.use-case'
-import { authenticate } from '../../../core/middleware/authenticate'
+import { authenticate, requireUser } from '../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../core/http/envelope'
 import {
   registerTokenJsonSchema,
@@ -17,7 +17,7 @@ import {
  * Notification routing adapters.
  * Connects Fastify endpoints to underlying notification use cases.
  */
-export function registerNotificationRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
+export function registerNotificationRoutes(fastify: AppFastifyInstance): void {
   const notificationRepo = new PrismaNotificationRepository(fastify.db.primary)
 
   const registerTokenUseCase = new RegisterTokenUseCase({
@@ -48,7 +48,7 @@ export function registerNotificationRoutes(fastify: FastifyInstance<any, any, an
       rateLimit: { max: 30, window: 60 },
     },
   }, async (request, reply) => {
-    const userId = request.user!.sub
+    const userId = requireUser(request).sub
     const result = await registerTokenUseCase.execute(userId, request.body)
     return reply.code(201).send(successEnvelope(result, request.requestId))
   })
@@ -61,7 +61,7 @@ export function registerNotificationRoutes(fastify: FastifyInstance<any, any, an
       rateLimit: { max: 30, window: 60 },
     },
   }, async (request, reply) => {
-    const userId = request.user!.sub
+    const userId = requireUser(request).sub
     await unregisterTokenUseCase.execute(userId, request.body)
     return reply.code(200).send(successEnvelope({ message: 'Token unregistered successfully' }, request.requestId))
   })
@@ -71,7 +71,7 @@ export function registerNotificationRoutes(fastify: FastifyInstance<any, any, an
     schema: getPreferencesJsonSchema,
     preHandler: [authenticate],
   }, async (request, reply) => {
-    const userId = request.user!.sub
+    const userId = requireUser(request).sub
     const result = await getPreferencesUseCase.execute(userId)
     return reply.code(200).send(successEnvelope(result, request.requestId))
   })
@@ -81,7 +81,7 @@ export function registerNotificationRoutes(fastify: FastifyInstance<any, any, an
     schema: updatePreferencesJsonSchema,
     preHandler: [authenticate],
   }, async (request, reply) => {
-    const userId = request.user!.sub
+    const userId = requireUser(request).sub
     const result = await updatePreferencesUseCase.execute(userId, request.body)
     return reply.code(200).send(successEnvelope(result, request.requestId))
   })

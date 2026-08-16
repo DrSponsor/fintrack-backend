@@ -51,7 +51,7 @@ export class WatchRenewalWorker extends BaseWorker<void, void> {
 
     // Concurrency control helper (limit to 5 parallel requests)
     const limit = 5
-    const tasks = connectedAccounts.map((account) => async () => {
+    const tasks = connectedAccounts.map((account): (() => Promise<void>) => async () => {
       try {
         const user = await this.prisma.user.findUnique({
           where: { id: account.userId },
@@ -87,7 +87,7 @@ export class WatchRenewalWorker extends BaseWorker<void, void> {
       results.push(p)
       executing.add(p)
 
-      const clean = () => {
+      const clean = (): void => {
         executing.delete(p)
       }
       p.then(clean, clean)

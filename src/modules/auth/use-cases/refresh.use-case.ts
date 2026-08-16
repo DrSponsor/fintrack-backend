@@ -84,6 +84,7 @@ export class RefreshUseCase {
       email: user.email,
       role: user.role,
       tier: user.tier,
+      sid: newSession.sessionId,
     }
 
     const accessToken = await signAccessToken(tokenPayload, this.jwtPrivateKeyPem)

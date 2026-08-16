@@ -1,8 +1,8 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyPluginCallback } from '../../types/fastify'
 import { registerTransactionRoutes } from './routes/transaction.routes'
 
-const transactionsModule: FastifyPluginCallback = (fastify, _options, done) => {
+const transactionsModule: AppFastifyPluginCallback = (fastify, _options, done) => {
   registerTransactionRoutes(fastify)
   done()
 }

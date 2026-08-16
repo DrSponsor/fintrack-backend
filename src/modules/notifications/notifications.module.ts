@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyPluginCallback } from '../../types/fastify'
 import { registerNotificationRoutes } from './routes/notification.routes'
 import { FcmProvider } from './providers/fcm.provider'
 import { PostmarkProvider } from './providers/postmark.provider'
@@ -9,14 +9,13 @@ import { PrismaCategoryRepository } from '../categories/repositories/category.re
 import { NotificationService } from './services/notification.service'
 import { NotificationWorker } from './workers/notification.worker'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
-import type { AppLogger } from '../../core/logger'
 
 /**
  * Notifications module.
  * Instantiates dependency graph and registers HTTP route handlers and BullMQ worker.
  */
-const notificationsModule: FastifyPluginCallback = (fastify, _options, done) => {
-  const logger = fastify.log as unknown as AppLogger
+const notificationsModule: AppFastifyPluginCallback = (fastify, _options, done) => {
+  const logger = fastify.log
   const appConfig = fastify.appConfig
 
   // 1. Instantiate external notification delivery providers

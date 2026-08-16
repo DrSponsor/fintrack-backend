@@ -2,7 +2,6 @@ import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { buildApp } from '../../../src/app'
 import { generateKeyPairSync } from 'node:crypto'
 import {
-  createDatabaseClientsStub,
   createQueueRegistryStub,
   FakeRedis,
 } from '../../helpers/fakes'
@@ -300,6 +299,11 @@ describe('POST /v1/auth/google', () => {
     expect(body.success).toBe(true)
     expect(body.data.userId).toBeTruthy()
     expect(body.data.accessToken).toBeTruthy()
+    // refreshToken must be present in the JSON body, not only the cookie —
+    // native mobile clients (Axios/fetch) don't persist cookies across
+    // requests by default, so the cookie alone leaves them unable to
+    // refresh past the access token's 15-minute lifetime.
+    expect(body.data.refreshToken).toBeTruthy()
     expect(body.data.expiresIn).toBe(900)
 
     const cookies = response.cookies
@@ -307,6 +311,7 @@ describe('POST /v1/auth/google', () => {
     expect(refreshCookie).toBeTruthy()
     expect(refreshCookie?.httpOnly).toBe(true)
     expect(refreshCookie?.path).toBe('/v1/auth')
+    expect(refreshCookie?.value).toBe(body.data.refreshToken)
 
     spyFetch.mockRestore()
   })

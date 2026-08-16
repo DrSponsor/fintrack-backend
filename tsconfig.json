@@ -17,6 +17,6 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true
   },
-  "include": ["src", "tests", "scripts", "prisma/**/*.ts", "vitest.config.ts"],
+  "include": ["src", "tests", "scripts", "prisma/**/*.ts", "vitest.config.ts", "prisma.config.ts"],
   "exclude": ["dist", "node_modules"]
 }

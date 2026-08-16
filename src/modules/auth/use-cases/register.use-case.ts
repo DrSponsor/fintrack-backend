@@ -110,12 +110,15 @@ export class RegisterUseCase {
 
 /**
  * Detects Prisma unique constraint violation.
- * Prisma 7 throws PrismaClientKnownRequestError with code P2002.
+ * Prisma 7 throws PrismaClientKnownRequestError with code P2002 specifically
+ * for this case — checking `name` alone (as an `||` alternative) would match
+ * every other Prisma error code too (e.g. P2022 missing column), silently
+ * misreporting unrelated database errors as "duplicate email".
  */
 function isUniqueConstraintError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) {
     return false
   }
-  const err = error as { code?: string; name?: string }
-  return err.code === 'P2002' || err.name === 'PrismaClientKnownRequestError'
+  const err = error as { code?: string }
+  return err.code === 'P2002'
 }

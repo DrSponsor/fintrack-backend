@@ -30,9 +30,10 @@ export class RecurringDetectorService {
       // Calculate diffs in days
       const intervals: number[] = []
       for (let i = 0; i < sorted.length - 1; i++) {
-        const d1 = sorted[i]!.transactionDate
-        const d2 = sorted[i + 1]!.transactionDate
-        const diffDays = Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24))
+        const txA = sorted[i]
+        const txB = sorted[i + 1]
+        if (txA === undefined || txB === undefined) continue
+        const diffDays = Math.round((txB.transactionDate.getTime() - txA.transactionDate.getTime()) / (1000 * 60 * 60 * 24))
         intervals.push(diffDays)
       }
 
@@ -41,8 +42,8 @@ export class RecurringDetectorService {
       // Check if intervals are consistently monthly (27-33 days)
       const isMonthly = intervals.every((days) => days >= 27 && days <= 33)
 
-      if (isWeekly || isMonthly) {
-        const lastTx = sorted[sorted.length - 1]!
+      const lastTx = sorted[sorted.length - 1]
+      if ((isWeekly || isMonthly) && lastTx !== undefined) {
         const intervalDays = isWeekly ? 7 : 30
         const nextDateObj = new Date(lastTx.transactionDate)
         nextDateObj.setUTCDate(nextDateObj.getUTCDate() + intervalDays)
@@ -51,7 +52,7 @@ export class RecurringDetectorService {
           merchantName: lastTx.merchantName,
           amountKobo: lastTx.amountKobo.toString(),
           frequency: isWeekly ? 'WEEKLY' : 'MONTHLY',
-          nextExpectedDate: nextDateObj.toISOString().split('T')[0]!,
+          nextExpectedDate: nextDateObj.toISOString().slice(0, 10),
         })
       }
     }

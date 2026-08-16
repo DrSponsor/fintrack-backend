@@ -26,6 +26,7 @@ model User {
   billingEvents         BillingEvent[]
   deviceTokens          DeviceToken[]
   notificationPreference NotificationPreference?
+  emailAccessLogs       EmailAccessLog[]
 
   @@map("users")
 }
@@ -42,8 +43,9 @@ model Account {
   balanceKobo         BigInt        @default(0) @map("balance_kobo")
   lastTransactionDate DateTime?     @map("last_transaction_date")
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions     Transaction[]
+  emailAccessLogs  EmailAccessLog[]
 
   @@index([userId])
   @@map("accounts")
@@ -234,6 +236,30 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+/// NDPR transparency requirement — records every email the system accessed
+/// for a user via the Gmail capture pipeline, and what happened to it.
+/// User-facing (GET /v1/privacy/email-access-log), not an internal audit
+/// trail — deliberately separate from AuditLog, which covers API-route
+/// actions and is anonymised (not deleted) on account deletion. Email
+/// access logs carry no internal audit value once the account is gone,
+/// so they are hard-deleted in the account deletion cascade instead.
+model EmailAccessLog {
+  id           String             @id @default(uuid()) @db.Uuid
+  userId       String             @map("user_id") @db.Uuid
+  accountId    String             @map("account_id") @db.Uuid
+  messageId    String             @map("message_id")
+  senderDomain String             @map("sender_domain")
+  subject      String
+  outcome      EmailAccessOutcome
+  accessedAt   DateTime           @default(now()) @map("accessed_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([userId, accessedAt])
+  @@map("email_access_logs")
+}
+
 model Subscription {
   id                     String             @id @default(uuid()) @db.Uuid
   userId                 String             @unique @map("user_id") @db.Uuid
@@ -345,6 +371,14 @@ enum MerchantMappingSource {
   SEEDED
   USER_CORRECTION
   AI_CONFIRMED
+}
+
+enum EmailAccessOutcome {
+  TRANSACTION_CREATED
+  DUPLICATE_SUPPRESSED
+  DISCARDED_SAFETY_FILTER
+  DISCARDED_NO_KEYWORDS
+  PARSE_FAILED
 }
 
 model DeviceToken {

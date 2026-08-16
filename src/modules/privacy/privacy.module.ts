@@ -1,9 +1,10 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyPluginCallback } from '../../types/fastify'
 import { registerPrivacyRoutes } from './routes/privacy.routes'
 import { PrismaPrivacyRepository } from './repositories/privacy.repo'
 import { PrismaUserRepository } from '../auth/repositories/user.repo'
 import { PrismaAccountRepository } from '../accounts/repositories/account.repo'
+import { PrismaEmailAccessLogRepository } from '../capture/email/repositories/email-access-log.repo'
 import { LocalStorageProvider } from '../../core/storage/local-storage.provider'
 import { InitiateDeletionUseCase } from './use-cases/initiate-deletion.use-case'
 import { CancelDeletionUseCase } from './use-cases/cancel-deletion.use-case'
@@ -11,7 +12,6 @@ import { InitiateExportUseCase } from './use-cases/initiate-export.use-case'
 import { AccountDeletionWorker } from './workers/account-deletion.worker'
 import { DataExportWorker } from './workers/data-export.worker'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
-import type { AppLogger } from '../../core/logger'
 
 /**
  * Privacy module — NDPR compliance.
@@ -21,15 +21,17 @@ import type { AppLogger } from '../../core/logger'
  *   - POST   /v1/users/me/data/cancel-deletion → Cancel pending deletion
  *   - POST   /v1/users/me/data-export  → Request full data export
  *   - GET    /v1/users/me/data/deletion-status  → Check if deletion is pending
+ *   - GET    /v1/privacy/email-access-log  → NDPR transparency log of emails accessed
  */
-const privacyModule: FastifyPluginCallback = (fastify, _options, done) => {
-  const logger = fastify.log as unknown as AppLogger
+const privacyModule: AppFastifyPluginCallback = (fastify, _options, done) => {
+  const logger = fastify.log
   const appConfig = fastify.appConfig
 
   // 1. Instantiate repository tier
   const privacyRepo = new PrismaPrivacyRepository(fastify.db.primary)
   const userRepo = new PrismaUserRepository(fastify.db.primary)
   const accountRepo = new PrismaAccountRepository(fastify.db.primary)
+  const emailAccessLogRepo = new PrismaEmailAccessLogRepository(fastify.db.primary)
 
   // 2. Instantiate storage provider (local mock for dev, swap to R2 in prod)
   const storageProvider = new LocalStorageProvider(logger)
@@ -58,6 +60,7 @@ const privacyModule: FastifyPluginCallback = (fastify, _options, done) => {
     cancelDeletionUseCase,
     initiateExportUseCase,
     privacyRepo,
+    emailAccessLogRepo,
   })
 
   // 5. Register BullMQ workers

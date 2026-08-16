@@ -207,6 +207,13 @@ export class PrismaPrivacyRepository implements IPrivacyRepository {
         where: { userId },
       }),
 
+      // Step 6b: Delete EmailAccessLog records — no internal audit value
+      // once the account is gone (unlike AuditLog/BillingEvent, which are
+      // anonymised, not deleted, for fraud/billing record-keeping).
+      this.prisma.emailAccessLog.deleteMany({
+        where: { userId },
+      }),
+
       // Step 7: Delete Account records (encrypted Gmail tokens already revoked in step 1)
       this.prisma.account.deleteMany({
         where: { userId },

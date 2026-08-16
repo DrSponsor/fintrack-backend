@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../types/fastify'
 import { checkDatabase } from '../config/database'
 import { checkRedis } from '../config/redis'
 import { dependencyUnavailable } from '../core/errors/factories'
@@ -47,7 +47,7 @@ const errorResponseSchema = {
   },
 } as const
 
-export function registerHealthRoutes(fastify: FastifyInstance<any, any, any, any, any>, checks: HealthChecks = {}): void {
+export function registerHealthRoutes(fastify: AppFastifyInstance, checks: HealthChecks = {}): void {
   fastify.get('/health/live', {
     schema: {
       response: {

@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyPluginCallback } from '../../types/fastify'
 import { registerAnalysisRoutes } from './routes/analysis.routes'
 import { PrismaAnalysisRepository } from './repositories/analysis.repo'
 import { PrismaBudgetRepository } from '../budgets/repositories/budget.repo'
@@ -10,11 +10,10 @@ import { ForecastService } from './services/forecast.service'
 import { WeeklyReportService } from './services/weekly-report.service'
 import { MonthlyReportService } from './services/monthly-report.service'
 import { WeeklyReportWorker, MonthlyReportWorker } from './workers/report.worker'
-import type { AppLogger } from '../../core/logger'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
 
-const analysisModule: FastifyPluginCallback = (fastify, _options, done) => {
-  const logger = fastify.log as unknown as AppLogger
+const analysisModule: AppFastifyPluginCallback = (fastify, _options, done) => {
+  const logger = fastify.log
 
   // 1. Register HTTP routes
   registerAnalysisRoutes(fastify)

@@ -6,14 +6,14 @@ export class ZenithParser implements IEmailParser {
   public readonly bankName = 'Zenith Bank'
   public readonly supportedDomains = ['zenithbank.com'] as const
 
-  public async parse(subject: string, bodyHtml: string, bodyText: string): Promise<ParsedTransaction | null> {
+  public parse(subject: string, bodyHtml: string, bodyText: string): Promise<ParsedTransaction | null> {
     const text = cleanText(bodyHtml || bodyText)
     if (!text.toLowerCase().includes('zenith') && !subject.toLowerCase().includes('zenith')) {
-      return null
+      return Promise.resolve(null)
     }
 
     const amountMatch = text.match(/(?:Amount|Amt)\s*(?::|of)?\s*(?:NGN|₦)?\s*([0-9,]+\.[0-9]{2})/i)
-    if (!amountMatch || !amountMatch[1]) return null
+    if (!amountMatch || !amountMatch[1]) return Promise.resolve(null)
     const amountKobo = parseAmountKobo(amountMatch[1])
 
     let type: 'DEBIT' | 'CREDIT' = 'DEBIT'
@@ -32,12 +32,12 @@ export class ZenithParser implements IEmailParser {
     const balanceMatch = text.match(/(?:Balance|Available Balance|Bal)\s*:\s*(?:NGN|₦)?\s*([0-9,]+\.[0-9]{2})/i)
     const balanceAfterKobo = balanceMatch && balanceMatch[1] ? parseAmountKobo(balanceMatch[1]) : undefined
 
-    return {
+    return Promise.resolve({
       amountKobo,
       type,
       merchantName,
       transactionDate: isNaN(transactionDate.getTime()) ? new Date() : transactionDate,
       balanceAfterKobo,
-    }
+    })
   }
 }

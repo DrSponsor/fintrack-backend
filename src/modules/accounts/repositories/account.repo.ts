@@ -108,7 +108,7 @@ export class PrismaAccountRepository implements IAccountRepository {
       select: SELECT_FIELDS,
     })
 
-    return toDomain(row as unknown as PrismaAccountRow)
+    return toDomain(row)
   }
 
   public async findByUserId(userId: string): Promise<readonly AccountRecord[]> {
@@ -118,7 +118,7 @@ export class PrismaAccountRepository implements IAccountRepository {
       orderBy: { bankName: 'asc' },
     })
 
-    return rows.map((row) => toDomain(row as unknown as PrismaAccountRow))
+    return rows.map((row) => toDomain(row))
   }
 
   public async findById(id: string): Promise<AccountRecord | null> {
@@ -131,7 +131,7 @@ export class PrismaAccountRepository implements IAccountRepository {
       return null
     }
 
-    return toDomain(row as unknown as PrismaAccountRow)
+    return toDomain(row)
   }
 
   public async update(id: string, data: UpdateAccountData): Promise<AccountRecord> {
@@ -144,7 +144,7 @@ export class PrismaAccountRepository implements IAccountRepository {
       select: SELECT_FIELDS,
     })
 
-    return toDomain(row as unknown as PrismaAccountRow)
+    return toDomain(row)
   }
 
   public async delete(id: string): Promise<void> {
@@ -165,7 +165,7 @@ export class PrismaAccountRepository implements IAccountRepository {
       select: SELECT_FIELDS,
     })
 
-    return toDomain(row as unknown as PrismaAccountRow)
+    return toDomain(row)
   }
 
   public async getGmailToken(id: string): Promise<string | null> {
@@ -183,6 +183,6 @@ export class PrismaAccountRepository implements IAccountRepository {
       select: SELECT_FIELDS,
     })
 
-    return rows.map((row) => toDomain(row as unknown as PrismaAccountRow))
+    return rows.map((row) => toDomain(row))
   }
 }

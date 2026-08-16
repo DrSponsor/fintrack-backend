@@ -1,10 +1,9 @@
 import fp from 'fastify-plugin'
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../types/fastify'
 import { OutboxWorker } from '../../workers/outbox.worker'
-import type { AppLogger } from '../logger'
 
-export const outboxPlugin = fp((fastify: FastifyInstance<any, any, any, any, any>, _options, done) => {
-  const logger = fastify.log as unknown as AppLogger
+export const outboxPlugin = fp((fastify: AppFastifyInstance, _options, done) => {
+  const logger = fastify.log
   const nodeEnv = fastify.appConfig.nodeEnv
 
   if (nodeEnv === 'test' || !fastify.runWorkers) {
@@ -25,6 +24,12 @@ export const outboxPlugin = fp((fastify: FastifyInstance<any, any, any, any, any
     })
   }, 5_000)
 
+  // Must stay `async` even though nothing here awaits: Fastify's hook
+  // dispatch only recognizes completion via a returned thenable or a `done`
+  // callback — a bare synchronous function satisfies neither and the hook
+  // (and therefore graceful shutdown) hangs forever. Verified directly on
+  // the equivalent preHandler case in core/middleware/authenticate.ts.
+  // eslint-disable-next-line @typescript-eslint/require-await
   fastify.addHook('onClose', async () => {
     logger.info('Stopping outbox worker...')
     clearInterval(intervalId)

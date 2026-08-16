@@ -198,11 +198,12 @@ export class OAuthService {
           grant_type: 'refresh_token',
         }),
       })
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.error({ err, accountId }, 'Google OAuth token refresh failed or timed out')
-      
+
       // If the token was revoked or is invalid, mark the account as disconnected
-      if (err.message && (err.message.includes('[400]') || err.message.includes('[401]'))) {
+      const message = err instanceof Error ? err.message : ''
+      if (message.includes('[400]') || message.includes('[401]')) {
         await this.accountRepo.updateGmailToken(accountId, null, false)
         throw tokenRevoked('Gmail connection was revoked by the user or has expired')
       }

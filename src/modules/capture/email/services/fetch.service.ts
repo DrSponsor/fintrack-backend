@@ -2,6 +2,13 @@ import type { AppLogger } from '../../../../core/logger'
 import { AppError } from '../../../../core/errors/AppError'
 import { ERROR_CODES } from '../../../../core/errors/codes'
 
+type GmailMessagePart = {
+  readonly mimeType?: string
+  readonly headers?: readonly { readonly name: string; readonly value: string }[]
+  readonly body?: { readonly data?: string }
+  readonly parts?: readonly GmailMessagePart[]
+}
+
 export class GmailQuotaExhaustedError extends Error {
   public constructor(message = 'Gmail API quota exhausted (429)') {
     super(message)
@@ -77,12 +84,7 @@ export class FetchService {
         const message = await response.json() as {
           readonly id: string
           readonly internalDate?: string
-          readonly payload?: {
-            readonly mimeType?: string
-            readonly headers?: readonly { readonly name: string; readonly value: string }[]
-            readonly body?: { readonly data?: string }
-            readonly parts?: readonly any[]
-          }
+          readonly payload?: GmailMessagePart
         }
 
         const headers = message.payload?.headers ?? []
@@ -98,7 +100,7 @@ export class FetchService {
 
         // Extract HTML and plain text bodies
         const bodies = { html: '', text: '' }
-        const extractBodyParts = (part: any) => {
+        const extractBodyParts = (part: GmailMessagePart): void => {
           if (part.mimeType === 'text/html' && part.body?.data) {
             bodies.html += Buffer.from(part.body.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
           } else if (part.mimeType === 'text/plain' && part.body?.data) {

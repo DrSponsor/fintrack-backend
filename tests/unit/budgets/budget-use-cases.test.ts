@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CreateBudgetUseCase } from '../../../src/modules/budgets/use-cases/create-budget.use-case'
 import { ListBudgetsUseCase } from '../../../src/modules/budgets/use-cases/list-budgets.use-case'
+import { UpdateBudgetUseCase } from '../../../src/modules/budgets/use-cases/update-budget.use-case'
 import { DeleteBudgetUseCase } from '../../../src/modules/budgets/use-cases/delete-budget.use-case'
 import type { IBudgetRepository, BudgetRecord } from '../../../src/modules/budgets/repositories/budget.repo'
 import type { ICategoryRepository, CategoryRecord } from '../../../src/modules/categories/repositories/category.repo'
@@ -17,6 +18,7 @@ function createMockBudgetRepo(options: {
   findByIdResult?: BudgetRecord | null
   findByUserResult?: readonly BudgetRecord[]
   findByCategoryAndPeriodResult?: readonly BudgetRecord[]
+  updateResult?: BudgetRecord
 } = {}): IBudgetRepository {
   return {
     create: vi.fn().mockResolvedValue(options.createResult ?? {} as BudgetRecord),
@@ -24,6 +26,7 @@ function createMockBudgetRepo(options: {
     findByUser: vi.fn().mockResolvedValue(options.findByUserResult ?? []),
     findByCategoryAndPeriod: vi.fn().mockResolvedValue(options.findByCategoryAndPeriodResult ?? []),
     findByCategory: vi.fn().mockResolvedValue([]),
+    update: vi.fn().mockResolvedValue(options.updateResult ?? {} as BudgetRecord),
     delete: vi.fn().mockResolvedValue(undefined),
     createAlert: vi.fn().mockResolvedValue(undefined),
     getAlertCount: vi.fn().mockResolvedValue(0),
@@ -139,6 +142,54 @@ describe('Budgets Use Cases', () => {
 
       expect(result).toEqual(mockBudgets)
       expect(budgetRepo.findByUser).toHaveBeenCalledWith('user-1')
+    })
+  })
+
+  describe('UpdateBudgetUseCase', () => {
+    it('throws 404 if budget does not exist', async () => {
+      const budgetRepo = createMockBudgetRepo({ findByIdResult: null })
+      const useCase = new UpdateBudgetUseCase({ budgetRepo })
+
+      await expect(
+        useCase.execute('user-1', 'b-1', { limitKobo: 60000n }),
+      ).rejects.toThrowError('Budget with ID b-1 not found')
+    })
+
+    it('throws 404 if budget does not belong to the user (anti-enumeration)', async () => {
+      const budget: BudgetRecord = {
+        id: 'b-1',
+        userId: 'other-user',
+        categoryId: 'cat-1',
+        limitKobo: '5000',
+        periodType: 'MONTHLY',
+        createdAt: new Date(),
+      }
+      const budgetRepo = createMockBudgetRepo({ findByIdResult: budget })
+      const useCase = new UpdateBudgetUseCase({ budgetRepo })
+
+      await expect(
+        useCase.execute('user-1', 'b-1', { limitKobo: 60000n }),
+      ).rejects.toThrowError('Budget with ID b-1 not found')
+      expect(budgetRepo.update).not.toHaveBeenCalled()
+    })
+
+    it('updates the limit if the budget belongs to the user', async () => {
+      const budget: BudgetRecord = {
+        id: 'b-1',
+        userId: 'user-1',
+        categoryId: 'cat-1',
+        limitKobo: '5000',
+        periodType: 'MONTHLY',
+        createdAt: new Date(),
+      }
+      const updated: BudgetRecord = { ...budget, limitKobo: '60000' }
+      const budgetRepo = createMockBudgetRepo({ findByIdResult: budget, updateResult: updated })
+      const useCase = new UpdateBudgetUseCase({ budgetRepo })
+
+      const result = await useCase.execute('user-1', 'b-1', { limitKobo: 60000n })
+
+      expect(result).toEqual(updated)
+      expect(budgetRepo.update).toHaveBeenCalledWith('b-1', { limitKobo: 60000n })
     })
   })
 

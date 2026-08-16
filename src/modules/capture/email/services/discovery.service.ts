@@ -70,7 +70,7 @@ export class DiscoveryService {
         }
         throw new AppError(
           ERROR_CODES.DEPENDENCY_UNAVAILABLE,
-          `Gmail history list failed: ${response.statusText}`,
+          `Gmail history list failed: ${response.statusText} - ${errorText}`,
           response.status,
         )
       }
@@ -150,7 +150,7 @@ export class DiscoveryService {
         }
         throw new AppError(
           ERROR_CODES.DEPENDENCY_UNAVAILABLE,
-          `Gmail message list failed: ${response.statusText}`,
+          `Gmail message list failed: ${response.statusText} - ${errorText}`,
           response.status,
         )
       }

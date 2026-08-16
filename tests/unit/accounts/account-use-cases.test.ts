@@ -128,6 +128,88 @@ describe('CreateAccountUseCase', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────
+// ListAccountsUseCase
+// ──────────────────────────────────────────────────────────────────
+
+describe('ListAccountsUseCase', () => {
+  it('returns all accounts for the given user', async () => {
+    const userId = 'user-1'
+    const accounts = [makeAccount({ userId }), makeAccount({ userId })]
+    const accountRepo = createMockAccountRepo({
+      findByUserId: vi.fn().mockResolvedValue(accounts),
+    })
+
+    const useCase = new ListAccountsUseCase({ accountRepo })
+    const result = await useCase.execute(userId)
+
+    expect(result).toEqual(accounts)
+    expect(accountRepo.findByUserId).toHaveBeenCalledWith(userId)
+  })
+
+  it('returns an empty list when the user has no accounts', async () => {
+    const accountRepo = createMockAccountRepo({
+      findByUserId: vi.fn().mockResolvedValue([]),
+    })
+
+    const useCase = new ListAccountsUseCase({ accountRepo })
+    const result = await useCase.execute('user-with-no-accounts')
+
+    expect(result).toEqual([])
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────
+// UpdateAccountUseCase — ownership enforcement + validation
+// ──────────────────────────────────────────────────────────────────
+
+describe('UpdateAccountUseCase', () => {
+  it('updates an owned account on valid input', async () => {
+    const userId = 'user-1'
+    const account = makeAccount({ userId })
+    const updated = makeAccount({ userId, bankName: 'Zenith Bank' })
+    const accountRepo = createMockAccountRepo({
+      findById: vi.fn().mockResolvedValue(account),
+      update: vi.fn().mockResolvedValue(updated),
+    })
+
+    const useCase = new UpdateAccountUseCase({ accountRepo, logger: silentLogger })
+    const result = await useCase.execute(userId, account.id, { bankName: 'Zenith Bank' })
+
+    expect(result.bankName).toBe('Zenith Bank')
+    expect(accountRepo.update).toHaveBeenCalledWith(account.id, { bankName: 'Zenith Bank' })
+  })
+
+  it('returns 404 when updating another user\'s account (never 403)', async () => {
+    const account = makeAccount({ userId: 'other-user' })
+    const accountRepo = createMockAccountRepo({
+      findById: vi.fn().mockResolvedValue(account),
+    })
+
+    const useCase = new UpdateAccountUseCase({ accountRepo, logger: silentLogger })
+
+    try {
+      await useCase.execute('attacker-id', account.id, { bankName: 'Zenith Bank' })
+      expect.unreachable('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError)
+      expect((err as AppError).statusCode).toBe(404)
+      expect((err as AppError).code).toBe(ERROR_CODES.NOT_FOUND)
+    }
+    expect(accountRepo.update).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid body before touching the repository', async () => {
+    const accountRepo = createMockAccountRepo()
+    const useCase = new UpdateAccountUseCase({ accountRepo, logger: silentLogger })
+
+    await expect(useCase.execute('user-1', 'account-1', { accountType: 'NOT_A_REAL_TYPE' }))
+      .rejects
+      .toThrow(AppError)
+    expect(accountRepo.findById).not.toHaveBeenCalled()
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────
 // GetAccountUseCase — ownership enforcement
 // ──────────────────────────────────────────────────────────────────
 

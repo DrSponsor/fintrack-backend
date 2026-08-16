@@ -25,7 +25,7 @@ describe('RBAC hasPermission', () => {
     })
 
     it('denies unregistered resource', () => {
-      expect(hasPermission('user', 'admin-panel:own:read' as Permission)).toBe(false)
+      expect(hasPermission('user', 'admin-panel:own:read')).toBe(false)
     })
   })
 

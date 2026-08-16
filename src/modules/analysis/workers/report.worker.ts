@@ -39,7 +39,7 @@ export class WeeklyReportWorker extends BaseWorker<WeeklyReportJobData, void> {
       connection: deps.connection,
       concurrency: deps.concurrency,
       logger: deps.logger,
-      processor: async (job: Job<any>) => {
+      processor: async (job: Job<WeeklyReportJobData>) => {
         if (job.name === 'recompute-all-users-weekly') {
           const users = await deps.prisma.user.findMany({
             select: { id: true },
@@ -92,7 +92,7 @@ export class MonthlyReportWorker extends BaseWorker<MonthlyReportJobData, void> 
       connection: deps.connection,
       concurrency: deps.concurrency,
       logger: deps.logger,
-      processor: async (job: Job<any>) => {
+      processor: async (job: Job<MonthlyReportJobData>) => {
         if (job.name === 'recompute-all-users-monthly') {
           const users = await deps.prisma.user.findMany({
             select: { id: true },

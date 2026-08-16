@@ -1,10 +1,49 @@
 import type { IAnalysisRepository } from '../repositories/analysis.repo'
 import type { IBudgetRepository } from '../../budgets/repositories/budget.repo'
 import type { IUserRepository } from '../../auth/repositories/user.repo'
-import type { AnomalyDetectorService } from './anomaly-detector.service'
-import type { RecurringDetectorService } from './recurring-detector.service'
-import type { ForecastService } from './forecast.service'
+import type { AnomalyDetectorService, AnomalyRecord } from './anomaly-detector.service'
+import type { RecurringDetectorService, RecurringTransaction } from './recurring-detector.service'
+import type { ForecastService, ForecastResult } from './forecast.service'
 import type { IAIProvider } from '../../../core/ai/ai-provider.interface'
+
+export type MonthlyReportResult = {
+  readonly categoryTotals: readonly {
+    readonly categoryId: string
+    readonly categoryName: string
+    readonly spentKobo: string
+    readonly percentage: string
+  }[]
+  readonly momChange: {
+    readonly percentageChange: string
+    readonly previousSpentKobo: string
+  }
+  readonly incomeVsSpend: {
+    readonly totalSpentKobo: string
+    readonly totalIncomeKobo: string
+    readonly savingsRate: string
+  }
+  readonly topMerchants: readonly {
+    readonly merchantName: string
+    readonly spentKobo: string
+  }[]
+  readonly spendByDay: readonly {
+    readonly date: string
+    readonly spentKobo: string
+  }[]
+  readonly anomalies: readonly AnomalyRecord[]
+  readonly budgets: readonly {
+    readonly budgetId: string
+    readonly categoryId: string
+    readonly limitKobo: string
+    readonly spentKobo: string
+    readonly remainingKobo: string
+    readonly projectedSpentKobo: string
+    readonly status: 'GREEN' | 'YELLOW' | 'RED'
+  }[]
+  readonly recurring: readonly RecurringTransaction[]
+  readonly forecast: ForecastResult
+  readonly narrative: string
+}
 
 export class MonthlyReportService {
   private readonly analysisRepo: IAnalysisRepository
@@ -33,7 +72,7 @@ export class MonthlyReportService {
     this.aiProvider = deps.aiProvider
   }
 
-  public async generateReport(userId: string, monthStart: Date): Promise<any> {
+  public async generateReport(userId: string, monthStart: Date): Promise<MonthlyReportResult> {
     const start = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), 1, 0, 0, 0, 0))
     const end = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0, 23, 59, 59, 999))
     const totalDays = end.getUTCDate()
@@ -176,8 +215,8 @@ export class MonthlyReportService {
     if (tier === 'PRO' && this.aiProvider) {
       const reportSummary = {
         schemaVersion: 1,
-        periodStart: start.toISOString().split('T')[0]!,
-        periodEnd: end.toISOString().split('T')[0]!,
+        periodStart: start.toISOString().slice(0, 10),
+        periodEnd: end.toISOString().slice(0, 10),
         totalSpentKobo: totalSpent.toString(),
         totalIncomeKobo: totalIncome.toString(),
       }

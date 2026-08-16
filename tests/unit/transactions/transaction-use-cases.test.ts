@@ -8,7 +8,6 @@ import type { ITransactionRepository, TransactionRecord } from '../../../src/mod
 import type { ICategoryRepository } from '../../../src/modules/categories/repositories/category.repo'
 import { NormalizerService } from '../../../src/modules/transactions/services/normalizer.service'
 import { AppError } from '../../../src/core/errors/AppError'
-import { ERROR_CODES } from '../../../src/core/errors/codes'
 import { randomUUID } from 'node:crypto'
 
 const silentLogger = {

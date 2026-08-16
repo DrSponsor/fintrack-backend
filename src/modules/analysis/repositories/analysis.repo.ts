@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { PrismaClient } from '../../../generated/prisma/client'
+import type { PrismaClient, Prisma } from '../../../generated/prisma/client'
 
 export type ReportRecord = {
   readonly id: string
@@ -9,7 +9,7 @@ export type ReportRecord = {
   readonly periodEnd: Date
   readonly isStale: boolean
   readonly schemaVersion: number
-  readonly data: any
+  readonly data: Prisma.JsonValue
   readonly generatedAt: Date
 }
 
@@ -45,7 +45,7 @@ export interface IAnalysisRepository {
     periodType: 'WEEKLY' | 'MONTHLY',
     periodStart: Date,
     periodEnd: Date,
-    data: any,
+    data: Prisma.InputJsonValue,
   ): Promise<void>
 
   markStale(userId: string, periodType: 'WEEKLY' | 'MONTHLY', periodStart: Date): Promise<void>
@@ -87,7 +87,7 @@ export class PrismaAnalysisRepository implements IAnalysisRepository {
     periodType: 'WEEKLY' | 'MONTHLY',
     periodStart: Date,
     periodEnd: Date,
-    data: any,
+    data: Prisma.InputJsonValue,
   ): Promise<void> {
     const id = randomUUID()
     await this.prismaPrimary.report.upsert({
@@ -160,7 +160,7 @@ export class PrismaAnalysisRepository implements IAnalysisRepository {
     return rows.map((r) => ({
       id: r.id,
       amountKobo: r.amountKobo,
-      type: r.type as 'DEBIT' | 'CREDIT',
+      type: r.type,
       merchantName: r.merchantName,
       categoryId: r.categoryId,
       transactionDate: r.transactionDate,
@@ -255,7 +255,7 @@ export class PrismaAnalysisRepository implements IAnalysisRepository {
     readonly periodEnd: Date
     readonly isStale: boolean
     readonly schemaVersion: number
-    readonly data: any
+    readonly data: Prisma.JsonValue
     readonly generatedAt: Date
   }): ReportRecord {
     return {

@@ -62,7 +62,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   ],
   admin: [
     // Admin bypasses permission checks entirely via wildcard.
-    '*:any:*' as Permission,
+    '*:any:*',
   ],
 } as const
 

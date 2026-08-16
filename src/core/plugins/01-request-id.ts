@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyInstance, AppFastifyPluginCallback } from '../../types/fastify'
 
-export const requestIdPlugin: FastifyPluginCallback = fp((fastify, _options, done) => {
+export const requestIdPlugin: AppFastifyPluginCallback = fp((fastify: AppFastifyInstance, _options, done) => {
   fastify.decorateRequest('requestId', '')
 
   fastify.addHook('onRequest', (request, reply, hookDone) => {

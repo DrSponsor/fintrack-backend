@@ -29,7 +29,7 @@ export function parseEventPayload<TEvent extends AppEventName>(
   // Each case returns the correct concrete type; the assertion bridges the generic.
   switch (event) {
     case 'transaction.created':
-      return transactionCreatedPayloadSchema.parse(payload) as EventPayloadMap[TEvent]
+      return transactionCreatedPayloadSchema.parse(payload)
     default: {
       // Exhaustive check: adding a new event name without a case here produces a compile error.
       const _exhaustive: never = event as never

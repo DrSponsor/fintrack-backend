@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../../../generated/prisma/client'
+import type { PrismaClient, Prisma } from '../../../generated/prisma/client'
 import type { BillingProvider, SubscriptionStatus } from '../../../generated/prisma/client'
 
 // ──────────────────────────────────────────────────────────────────
@@ -12,7 +12,7 @@ export type BillingEventRecord = {
   readonly eventType: string
   readonly normalizedType: string
   readonly userId: string | null
-  readonly payload: any
+  readonly payload: Prisma.JsonValue
   readonly processed: boolean
   readonly processedAt: Date | null
   readonly processingError: string | null
@@ -47,13 +47,13 @@ export interface IBillingRepository {
     readonly eventType: string
     readonly normalizedType: string
     readonly userId: string | null
-    readonly payload: any
+    readonly payload: Prisma.InputJsonValue
   }): Promise<BillingEventRecord>
 
   markProcessed(providerEventId: string): Promise<void>
   markFailed(providerEventId: string, error: string): Promise<void>
   markUnresolvable(providerEventId: string): Promise<void>
-  getPayload(providerEventId: string): Promise<any>
+  getPayload(providerEventId: string): Promise<Prisma.JsonValue | undefined>
 }
 
 export interface ISubscriptionRepository {
@@ -102,7 +102,7 @@ export class PrismaBillingRepository implements IBillingRepository {
     readonly eventType: string
     readonly normalizedType: string
     readonly userId: string | null
-    readonly payload: any
+    readonly payload: Prisma.InputJsonValue
   }): Promise<BillingEventRecord> {
     const event = await this.prisma.billingEvent.create({
       data: {
@@ -162,7 +162,7 @@ export class PrismaBillingRepository implements IBillingRepository {
     })
   }
 
-  public async getPayload(providerEventId: string): Promise<any> {
+  public async getPayload(providerEventId: string): Promise<Prisma.JsonValue | undefined> {
     const event = await this.prisma.billingEvent.findUnique({
       where: { providerEventId },
       select: { payload: true },

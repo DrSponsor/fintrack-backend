@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../../types/fastify'
 import { RegisterUseCase } from '../use-cases/register.use-case'
 import { LoginUseCase } from '../use-cases/login.use-case'
 import { RefreshUseCase } from '../use-cases/refresh.use-case'
@@ -34,7 +34,7 @@ import {
  *
  * No process.env reads. No service locators. Pure constructor injection.
  */
-export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
+export function registerAuthRoutes(fastify: AppFastifyInstance): void {
   // ── Dependency wiring ──────────────────────────────────────────
   const userRepo = new PrismaUserRepository(fastify.db.primary)
   const sessionRepo = new RedisSessionRepository(fastify.redis)
@@ -235,6 +235,7 @@ export function registerAuthRoutes(fastify: FastifyInstance<any, any, any, any, 
       {
         userId: result.userId,
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
       },
       request.requestId,

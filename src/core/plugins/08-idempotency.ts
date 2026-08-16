@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyInstance, AppFastifyPluginCallback } from '../../types/fastify'
 import { ensureRedisConnected } from '../../config/redis'
 import { sha256Hex } from '../crypto/hashing'
 import { AppError } from '../errors/AppError'
@@ -48,7 +48,7 @@ function payloadToString(payload: unknown): string {
   return JSON.stringify(payload) ?? ''
 }
 
-export const idempotencyPlugin: FastifyPluginCallback = fp((fastify, _options, done) => {
+export const idempotencyPlugin: AppFastifyPluginCallback = fp((fastify: AppFastifyInstance, _options, done) => {
   fastify.decorateRequest('idempotency')
 
   fastify.addHook('preHandler', async (request, reply) => {
@@ -107,7 +107,7 @@ export const idempotencyPlugin: FastifyPluginCallback = fp((fastify, _options, d
     return payload
   })
 
-  fastify.addHook('onResponse', async (request, reply) => {
+  fastify.addHook('onResponse', async (request, _reply) => {
     if (request.idempotency?.lockKey) {
       await fastify.redis.del(request.idempotency.lockKey).catch((error: unknown) => {
         fastify.log.error({ err: error, lockKey: request.idempotency?.lockKey }, 'failed to delete idempotency lock key')

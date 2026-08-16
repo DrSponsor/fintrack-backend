@@ -17,31 +17,33 @@ async function start(): Promise<void> {
   app.log.info('Worker process successfully initialized.')
 
   // Periodically poll queue and DLQ (failed) depths to export to Prometheus
-  const intervalId = setInterval(async () => {
-    try {
-      const queues = [
-        app.queues.captureEmail,
-        app.queues.captureManual,
-        app.queues.analysisWeekly,
-        app.queues.analysisMonthly,
-        app.queues.notificationsPush,
-        app.queues.watchRenewal,
-        app.queues.billingWebhooks,
-      ]
+  const intervalId = setInterval(() => {
+    void (async (): Promise<void> => {
+      try {
+        const queues = [
+          app.queues.captureEmail,
+          app.queues.captureManual,
+          app.queues.analysisWeekly,
+          app.queues.analysisMonthly,
+          app.queues.notificationsPush,
+          app.queues.watchRenewal,
+          app.queues.billingWebhooks,
+        ]
 
-      for (const q of queues) {
-        try {
-          const failedCount = await q.getFailedCount()
-          const waitingCount = await q.getWaitingCount()
-          dlqDepthGauge.set({ queue: q.name }, failedCount)
-          queueDepthGauge.set({ queue: q.name }, waitingCount)
-        } catch (error) {
-          app.log.error({ err: error, queue: q.name }, 'Failed to poll queue metrics')
+        for (const q of queues) {
+          try {
+            const failedCount = await q.getFailedCount()
+            const waitingCount = await q.getWaitingCount()
+            dlqDepthGauge.set({ queue: q.name }, failedCount)
+            queueDepthGauge.set({ queue: q.name }, waitingCount)
+          } catch (error) {
+            app.log.error({ err: error, queue: q.name }, 'Failed to poll queue metrics')
+          }
         }
+      } catch (error) {
+        app.log.error({ err: error }, 'Queue metrics polling cycle failed')
       }
-    } catch (error) {
-      app.log.error({ err: error }, 'Queue metrics polling cycle failed')
-    }
+    })()
   }, 60_000)
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {

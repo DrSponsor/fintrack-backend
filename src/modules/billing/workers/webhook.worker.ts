@@ -33,7 +33,7 @@ export type WebhookWorkerDeps = {
   readonly queues: QueueRegistry
 }
 
-export class BillingWebhookWorker extends BaseWorker<any, void> {
+export class BillingWebhookWorker extends BaseWorker<WebhookJobData, void> {
   private readonly billingRepo: IBillingRepository
   private readonly subscriptionRepo: ISubscriptionRepository
   private readonly userRepo: IUserRepository
@@ -50,7 +50,7 @@ export class BillingWebhookWorker extends BaseWorker<any, void> {
       connection: deps.connection,
       concurrency: deps.concurrency,
       logger: deps.logger,
-      processor: async (job: Job<any>) => {
+      processor: async (job: Job<WebhookJobData>) => {
         if (job.name === 'sync-subscriptions') {
           await runSubscriptionSync({
             subscriptionRepo: this.subscriptionRepo,
@@ -68,7 +68,7 @@ export class BillingWebhookWorker extends BaseWorker<any, void> {
             logger: this.logger,
           })
         } else {
-          const { providerEventId } = job.data as WebhookJobData
+          const { providerEventId } = job.data
           await this.processWebhookEvent(providerEventId)
         }
       },

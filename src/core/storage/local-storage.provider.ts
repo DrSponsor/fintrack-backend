@@ -27,7 +27,7 @@ export class LocalStorageProvider implements IStorageProvider {
   private readonly logger: AppLogger
   private readonly expiryMs: number
 
-  public constructor(logger: AppLogger, basePath?: string | undefined, expiryMs?: number | undefined) {
+  public constructor(logger: AppLogger, basePath?: string  , expiryMs?: number  ) {
     // Default to ./data/exports relative to cwd
     this.basePath = basePath ?? join(process.cwd(), 'data', 'exports')
     this.logger = logger

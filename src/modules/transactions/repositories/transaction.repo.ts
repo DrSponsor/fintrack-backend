@@ -90,11 +90,11 @@ function toDomain(row: PrismaTransactionRow): TransactionRecord {
     accountId: row.accountId,
     userId: row.account.userId,
     amountKobo: row.amountKobo.toString(),
-    type: row.type as 'DEBIT' | 'CREDIT',
+    type: row.type,
     merchantName: row.merchantName,
     categoryId: row.categoryId,
     transactionDate: row.transactionDate,
-    source: row.source as 'EMAIL' | 'MANUAL' | 'SMS' | 'MONO',
+    source: row.source,
     isVerified: row.isVerified,
     createdAt: row.createdAt,
   }
@@ -157,11 +157,11 @@ export class PrismaTransactionRepository implements ITransactionRepository {
           id: transactionId,
           accountId: data.accountId,
           amountKobo: data.amountKobo,
-          type: data.type as TransactionType,
+          type: data.type,
           merchantName: data.merchantName,
           categoryId: data.categoryId,
           transactionDate: data.transactionDate,
-          source: data.source as CaptureSource,
+          source: data.source,
           idempotencyKey: data.idempotencyKey,
           isVerified: data.isVerified ?? false,
         },
@@ -194,7 +194,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
       }),
     ])
 
-    return toDomain(txRow as unknown as PrismaTransactionRow)
+    return toDomain(txRow)
   }
 
   public async findById(id: string): Promise<TransactionRecord | null> {
@@ -207,7 +207,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
       return null
     }
 
-    return toDomain(row as unknown as PrismaTransactionRow)
+    return toDomain(row)
   }
 
   public async findByUser(
@@ -220,7 +220,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
       account: { userId },
       ...(filters?.accountId ? { accountId: filters.accountId } : {}),
       ...(filters?.categoryId ? { categoryId: filters.categoryId } : {}),
-      ...(filters?.type ? { type: filters.type as TransactionType } : {}),
+      ...(filters?.type ? { type: filters.type } : {}),
       ...(filters?.startDate || filters?.endDate
         ? {
             transactionDate: {
@@ -237,7 +237,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
       ...(cursor
         ? {
             skip: 1,
-            cursor: await (async () => {
+            cursor: await (async (): Promise<{ id_transactionDate: { id: string; transactionDate: Date } }> => {
               if (cursor.includes('_')) {
                 const [id, dateStr] = cursor.split('_')
                 if (!id || !dateStr) throw new Error('Invalid cursor format')
@@ -260,7 +260,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
     const dataRows = hasMore ? rows.slice(0, limit) : rows
 
     return {
-      data: dataRows.map((row) => toDomain(row as unknown as PrismaTransactionRow)),
+      data: dataRows.map((row) => toDomain(row)),
       hasMore,
     }
   }

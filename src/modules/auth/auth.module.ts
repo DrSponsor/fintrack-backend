@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyPluginCallback } from '../../types/fastify'
 import { registerAuthRoutes } from './routes/auth.routes'
 
 /**
@@ -8,7 +8,7 @@ import { registerAuthRoutes } from './routes/auth.routes'
  * Other modules import from this file and nothing else.
  * Internals (use cases, repositories, schemas) are not exposed.
  */
-const authModule: FastifyPluginCallback = (fastify, _options, done) => {
+const authModule: AppFastifyPluginCallback = (fastify, _options, done) => {
   registerAuthRoutes(fastify)
   done()
 }

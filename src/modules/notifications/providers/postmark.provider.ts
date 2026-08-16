@@ -23,7 +23,7 @@ export class PostmarkProvider implements IEmailProvider {
   public constructor(
     logger: AppLogger,
     emailFrom: string,
-    serverToken?: string | undefined
+    serverToken?: string  
   ) {
     this.logger = logger
     this.fromAddress = emailFrom

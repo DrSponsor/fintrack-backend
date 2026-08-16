@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../../types/fastify'
 import {
   ListTransactionsUseCase,
   GetTransactionUseCase,
@@ -7,7 +7,7 @@ import {
 import { PrismaTransactionRepository } from '../repositories/transaction.repo'
 import { PrismaCategoryRepository } from '../../categories/repositories/category.repo'
 import { NormalizerService } from '../services/normalizer.service'
-import { authenticate } from '../../../core/middleware/authenticate'
+import { authenticate, requireUser } from '../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../core/http/envelope'
 import {
   listTransactionsJsonSchema,
@@ -15,7 +15,7 @@ import {
   correctCategoryJsonSchema,
 } from '../schemas/transaction.schemas'
 
-export function registerTransactionRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
+export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
   const transactionRepo = new PrismaTransactionRepository(fastify.db.primary)
   const categoryRepo = new PrismaCategoryRepository(fastify.db.primary)
   const normalizer = new NormalizerService()
@@ -37,7 +37,7 @@ export function registerTransactionRoutes(fastify: FastifyInstance<any, any, any
       preHandler: [authenticate],
     },
     async (request, reply) => {
-      const userId = request.user!.sub
+      const userId = requireUser(request).sub
       const result = await listTransactionsUseCase.execute(userId, request.query)
 
       const lastItem = result.data[result.data.length - 1]
@@ -63,7 +63,7 @@ export function registerTransactionRoutes(fastify: FastifyInstance<any, any, any
       preHandler: [authenticate],
     },
     async (request, reply) => {
-      const userId = request.user!.sub
+      const userId = requireUser(request).sub
       const { id } = request.params as { id: string }
       const transaction = await getTransactionUseCase.execute(userId, id)
 
@@ -82,7 +82,7 @@ export function registerTransactionRoutes(fastify: FastifyInstance<any, any, any
       },
     },
     async (request, reply) => {
-      const userId = request.user!.sub
+      const userId = requireUser(request).sub
       const { id } = request.params as { id: string }
       await correctCategoryUseCase.execute(userId, id, request.body)
 

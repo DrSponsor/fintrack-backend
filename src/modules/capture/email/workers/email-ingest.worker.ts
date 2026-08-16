@@ -4,6 +4,7 @@ import { QUEUE_NAMES } from '../../../../core/queue/queues'
 import type { PrismaClient } from '../../../../generated/prisma/client'
 import type { IAccountRepository } from '../../../accounts/repositories/account.repo'
 import type { ITransactionRepository } from '../../../transactions/repositories/transaction.repo'
+import type { IEmailAccessLogRepository } from '../repositories/email-access-log.repo'
 import type { OAuthService } from '../services/oauth.service'
 import { GmailQuotaExhaustedError } from '../services/fetch.service'
 import type { FetchService, GmailEmailDetails } from '../services/fetch.service'
@@ -27,6 +28,7 @@ export type EmailIngestWorkerDeps = {
   readonly prisma: PrismaClient
   readonly accountRepo: IAccountRepository
   readonly transactionRepo: ITransactionRepository
+  readonly emailAccessLogRepo: IEmailAccessLogRepository
   readonly oauthService: OAuthService
   readonly fetchService: FetchService
   readonly safetyFilter: SafetyFilterService
@@ -44,6 +46,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
   private readonly prisma: PrismaClient
   private readonly accountRepo: IAccountRepository
   private readonly transactionRepo: ITransactionRepository
+  private readonly emailAccessLogRepo: IEmailAccessLogRepository
   private readonly oauthService: OAuthService
   private readonly fetchService: FetchService
   private readonly safetyFilter: SafetyFilterService
@@ -68,6 +71,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     this.prisma = deps.prisma
     this.accountRepo = deps.accountRepo
     this.transactionRepo = deps.transactionRepo
+    this.emailAccessLogRepo = deps.emailAccessLogRepo
     this.oauthService = deps.oauthService
     this.fetchService = deps.fetchService
     this.safetyFilter = deps.safetyFilter
@@ -81,7 +85,37 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     this.captureEmailQueue = deps.captureEmailQueue
   }
 
-  private async processJob(job: Job<any, void, string>): Promise<void> {
+  /**
+   * NDPR transparency record — every email the system accesses via the
+   * Gmail capture pipeline gets one row here, regardless of outcome.
+   * Surfaced to the user via GET /v1/privacy/email-access-log.
+   *
+   * Logging failure must never break transaction ingestion — it's a
+   * compliance record, not part of the core pipeline's correctness.
+   */
+  private async logEmailAccess(
+    userId: string,
+    accountId: string,
+    messageId: string,
+    senderDomain: string,
+    subject: string,
+    outcome: 'TRANSACTION_CREATED' | 'DUPLICATE_SUPPRESSED' | 'DISCARDED_SAFETY_FILTER' | 'DISCARDED_NO_KEYWORDS' | 'PARSE_FAILED',
+  ): Promise<void> {
+    try {
+      await this.emailAccessLogRepo.create({
+        userId,
+        accountId,
+        messageId,
+        senderDomain,
+        subject,
+        outcome,
+      })
+    } catch (err) {
+      this.logger.error({ err, messageId, outcome }, 'Failed to write email access log entry')
+    }
+  }
+
+  private async processJob(job: Job<EmailIngestJobData, void, string>): Promise<void> {
     if (job.name === 'cleanup-raw-snippets') {
       const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       this.logger.info({ cutoff }, 'Starting raw transaction snippet cleanup job...')
@@ -181,11 +215,13 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     // 4. Run through the Safety Gate filters
     if (this.safetyFilter.shouldDiscard(email.subject, email.bodyText)) {
       this.logger.info({ messageId, subject: email.subject }, 'Email discarded by safety gate (OTP/security keyword)')
+      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DISCARDED_SAFETY_FILTER')
       return
     }
 
     if (!this.safetyFilter.hasTransactionKeywords(email.subject, email.bodyText)) {
       this.logger.info({ messageId, subject: email.subject }, 'Email discarded silently (no transaction keywords found)')
+      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DISCARDED_NO_KEYWORDS')
       return
     }
 
@@ -210,6 +246,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
 
     if (parsedTx === null) {
       this.logger.warn({ messageId, senderDomain: email.senderDomain }, 'Failed to parse transaction from email')
+      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'PARSE_FAILED')
       return
     }
 
@@ -226,6 +263,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     const duplicateId = await this.deduplicator.findDuplicate(hash)
     if (duplicateId !== null) {
       this.logger.info({ messageId, duplicateId, hash }, 'Duplicate transaction detected in deduplicator and suppressed')
+      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
       return
     }
 
@@ -262,15 +300,17 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
 
       // 10. Track in deduplication cache
       await this.deduplicator.trackTransaction(hash, transaction.id)
-      
+
       this.logger.info(
         { messageId, transactionId: transaction.id, senderDomain: email.senderDomain },
         'Email transaction successfully ingested',
       )
+      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'TRANSACTION_CREATED')
     } catch (err) {
       if (err && typeof err === 'object' && 'code' in err && (err as { code?: unknown }).code === 'P2002') {
         // Unique key constraint violation: transaction was already written concurrently
         this.logger.info({ messageId }, 'Deduplicated transaction at database layer (unique idempotencyKey)')
+        await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
         return
       }
       throw err

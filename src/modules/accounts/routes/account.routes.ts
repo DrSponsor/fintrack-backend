@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../../types/fastify'
 import {
   CreateAccountUseCase,
   ListAccountsUseCase,
@@ -7,7 +7,7 @@ import {
   DeleteAccountUseCase,
 } from '../use-cases/account.use-cases'
 import { PrismaAccountRepository } from '../repositories/account.repo'
-import { authenticate } from '../../../core/middleware/authenticate'
+import { authenticate, requireUser } from '../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../core/http/envelope'
 import {
   createAccountJsonSchema,
@@ -26,7 +26,7 @@ import {
  * This avoids a redundant DB query: the use case already looks up
  * the account and checks ownership in a single operation.
  */
-export function registerAccountRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
+export function registerAccountRoutes(fastify: AppFastifyInstance): void {
   const accountRepo = new PrismaAccountRepository(fastify.db.primary)
 
   const createAccountUseCase = new CreateAccountUseCase({ accountRepo, logger: fastify.log })
@@ -44,8 +44,8 @@ export function registerAccountRoutes(fastify: FastifyInstance<any, any, any, an
     },
   }, async (request, reply) => {
     const account = await createAccountUseCase.execute(
-      request.user!.sub,
-      request.user!.tier,
+      requireUser(request).sub,
+      requireUser(request).tier,
       request.body,
     )
 
@@ -57,7 +57,7 @@ export function registerAccountRoutes(fastify: FastifyInstance<any, any, any, an
     schema: listAccountsJsonSchema,
     preHandler: [authenticate],
   }, async (request) => {
-    const accounts = await listAccountsUseCase.execute(request.user!.sub)
+    const accounts = await listAccountsUseCase.execute(requireUser(request).sub)
     return successEnvelope(accounts, request.requestId)
   })
 
@@ -66,7 +66,7 @@ export function registerAccountRoutes(fastify: FastifyInstance<any, any, any, an
     schema: getAccountJsonSchema,
     preHandler: [authenticate],
   }, async (request) => {
-    const account = await getAccountUseCase.execute(request.user!.sub, request.params.id)
+    const account = await getAccountUseCase.execute(requireUser(request).sub, request.params.id)
     return successEnvelope(account, request.requestId)
   })
 
@@ -79,7 +79,7 @@ export function registerAccountRoutes(fastify: FastifyInstance<any, any, any, an
     },
   }, async (request) => {
     const account = await updateAccountUseCase.execute(
-      request.user!.sub,
+      requireUser(request).sub,
       request.params.id,
       request.body,
     )
@@ -95,7 +95,7 @@ export function registerAccountRoutes(fastify: FastifyInstance<any, any, any, an
       financialMutation: true,
     },
   }, async (request) => {
-    await deleteAccountUseCase.execute(request.user!.sub, request.params.id)
+    await deleteAccountUseCase.execute(requireUser(request).sub, request.params.id)
     return successEnvelope({ message: 'Account deleted' }, request.requestId)
   })
 }

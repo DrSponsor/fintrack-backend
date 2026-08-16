@@ -67,7 +67,7 @@ export class PrismaUserRepository implements IUserRepository {
       email: user.email,
       passwordHash: user.passwordHash,
       googleId: user.googleId,
-      tier: user.tier as Tier,
+      tier: user.tier,
       role: 'user',
       createdAt: user.createdAt,
     }
@@ -95,7 +95,7 @@ export class PrismaUserRepository implements IUserRepository {
       email: user.email,
       passwordHash: user.passwordHash,
       googleId: user.googleId,
-      tier: user.tier as Tier,
+      tier: user.tier,
       role: 'user',
       createdAt: user.createdAt,
     }
@@ -123,7 +123,7 @@ export class PrismaUserRepository implements IUserRepository {
       email: user.email,
       passwordHash: user.passwordHash,
       googleId: user.googleId,
-      tier: user.tier as Tier,
+      tier: user.tier,
       role: 'user',
       createdAt: user.createdAt,
     }
@@ -151,7 +151,7 @@ export class PrismaUserRepository implements IUserRepository {
       email: user.email,
       passwordHash: user.passwordHash,
       googleId: user.googleId,
-      tier: user.tier as Tier,
+      tier: user.tier,
       role: 'user',
       createdAt: user.createdAt,
     }

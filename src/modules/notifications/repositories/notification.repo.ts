@@ -55,9 +55,9 @@ export class PrismaNotificationRepository implements INotificationRepository {
           platform,
         },
       })
-    } catch (err: any) {
+    } catch (err: unknown) {
       // P2002 is Prisma's unique constraint violation code
-      if (err.code === 'P2002') {
+      if ((err as { code?: string }).code === 'P2002') {
         // Re-assign the device token to the current user
         return await this.prisma.deviceToken.update({
           where: { token },
@@ -105,8 +105,8 @@ export class PrismaNotificationRepository implements INotificationRepository {
           monthlyReports: true,
         },
       })
-    } catch (err: any) {
-      if (err.code === 'P2002') {
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code === 'P2002') {
         const existing = await this.prisma.notificationPreference.findUnique({
           where: { userId },
         })

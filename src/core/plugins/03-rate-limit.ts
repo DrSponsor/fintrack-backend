@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyInstance, AppFastifyPluginCallback } from '../../types/fastify'
 import { LRUCache } from 'lru-cache'
 import { AppError } from '../errors/AppError'
 import { ERROR_CODES } from '../errors/codes'
@@ -25,7 +25,7 @@ function shouldSkipRateLimit(url: string): boolean {
   return url.startsWith('/health/') || url.startsWith('/metrics')
 }
 
-export const rateLimitPlugin: FastifyPluginCallback = fp((fastify, _options, done) => {
+export const rateLimitPlugin: AppFastifyPluginCallback = fp((fastify: AppFastifyInstance, _options, done) => {
   fastify.addHook('onRequest', async (request, reply) => {
     if (shouldSkipRateLimit(request.url)) {
       return

@@ -49,7 +49,7 @@ export class PaystackProvider implements IBillingProvider {
   public readonly providerName = 'paystack' as const
   public readonly signatureHeaderName = 'x-paystack-signature' as const
   private readonly secretKey: string
-  private readonly breaker: CircuitBreaker<[string, RequestInit], any>
+  private readonly breaker: CircuitBreaker<[string, RequestInit], unknown>
 
   public constructor(secretKey: string) {
     this.secretKey = secretKey
@@ -71,7 +71,7 @@ export class PaystackProvider implements IBillingProvider {
     circuitBreakerStateGauge.set({ name: 'paystack' }, 0)
   }
 
-  private async callPaystackApi(path: string, options: RequestInit): Promise<any> {
+  private async callPaystackApi(path: string, options: RequestInit): Promise<unknown> {
     if (!this.secretKey || this.secretKey.length === 0 || this.secretKey === 'ts_paystack_secret_key_fallback') {
       throw new Error('PAYSTACK_SECRET_KEY is not configured')
     }
@@ -98,20 +98,20 @@ export class PaystackProvider implements IBillingProvider {
 
   public async createCustomer(user: { id: string; email: string }): Promise<string> {
     try {
-      const res: PaystackCustomerResponse = await this.breaker.fire('/customer', {
+      const res = await this.breaker.fire('/customer', {
         method: 'POST',
         body: JSON.stringify({
           email: user.email,
           metadata: { userId: user.id },
         }),
-      })
+      }) as PaystackCustomerResponse
 
       if (!res.status || !res.data?.customer_code) {
         throw new Error('Invalid response from Paystack createCustomer')
       }
 
       return res.data.customer_code
-    } catch (err) {
+    } catch (_err) {
       throw dependencyUnavailable('Billing provider service is temporarily unavailable')
     }
   }
@@ -125,7 +125,7 @@ export class PaystackProvider implements IBillingProvider {
     try {
       // In Paystack, amount is sent in kobo. Plan amount overrides initialize amount,
       // but passing it is safe.
-      const res: PaystackInitializeResponse = await this.breaker.fire('/transaction/initialize', {
+      const res = await this.breaker.fire('/transaction/initialize', {
         method: 'POST',
         body: JSON.stringify({
           email,
@@ -137,14 +137,14 @@ export class PaystackProvider implements IBillingProvider {
             planId: plan.id,
           },
         }),
-      })
+      }) as PaystackInitializeResponse
 
       if (!res.status || !res.data?.authorization_url) {
         throw new Error('Invalid response from Paystack transaction initialize')
       }
 
       return res.data.authorization_url
-    } catch (err) {
+    } catch (_err) {
       throw dependencyUnavailable('Billing provider service is temporarily unavailable')
     }
   }
@@ -227,7 +227,7 @@ export class PaystackProvider implements IBillingProvider {
     }
 
     // Extract customer email to look up userId
-    const email = data.customer?.email as string | undefined
+    const email = data.customer?.email
     // Check if userId is passed in metadata
     let userId: string | null = null
     const metadata = data.metadata || {}
@@ -238,7 +238,7 @@ export class PaystackProvider implements IBillingProvider {
     }
 
     // Fetch subscription ID
-    const providerSubscriptionId = (data.subscription_code || data.subscription?.subscription_code || null) as string | null
+    const providerSubscriptionId = (data.subscription_code || data.subscription?.subscription_code || null)
 
     // Extract amount
     const amountKobo = data.amount ? BigInt(data.amount) : null
@@ -260,9 +260,9 @@ export class PaystackProvider implements IBillingProvider {
   public async cancelSubscription(providerSubscriptionId: string): Promise<void> {
     try {
       // 1. Fetch email_token first
-      const subDetails: PaystackSubscriptionDetailResponse = await this.breaker.fire(`/subscription/${providerSubscriptionId}`, {
+      const subDetails = await this.breaker.fire(`/subscription/${providerSubscriptionId}`, {
         method: 'GET',
-      })
+      }) as PaystackSubscriptionDetailResponse
 
       if (!subDetails.status || !subDetails.data?.email_token) {
         throw new Error('Failed to retrieve subscription email token for cancellation')
@@ -277,12 +277,12 @@ export class PaystackProvider implements IBillingProvider {
           code: providerSubscriptionId,
           token: emailToken,
         }),
-      })
+      }) as { readonly status: boolean }
 
       if (!res.status) {
         throw new Error('Paystack disable subscription returned status false')
       }
-    } catch (err) {
+    } catch (_err) {
       throw dependencyUnavailable('Billing provider service is temporarily unavailable during cancellation')
     }
   }
@@ -292,9 +292,9 @@ export class PaystackProvider implements IBillingProvider {
     readonly currentPeriodEnd: Date
   }> {
     try {
-      const res: PaystackSubscriptionDetailResponse = await this.breaker.fire(`/subscription/${providerSubscriptionId}`, {
+      const res = await this.breaker.fire(`/subscription/${providerSubscriptionId}`, {
         method: 'GET',
-      })
+      }) as PaystackSubscriptionDetailResponse
 
       if (!res.status || !res.data) {
         throw new Error('Failed to fetch subscription details')
@@ -315,7 +315,7 @@ export class PaystackProvider implements IBillingProvider {
         status,
         currentPeriodEnd: new Date(res.data.current_period_end),
       }
-    } catch (err) {
+    } catch (_err) {
       throw dependencyUnavailable('Billing provider service is temporarily unavailable')
     }
   }

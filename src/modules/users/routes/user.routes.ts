@@ -1,8 +1,8 @@
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../../types/fastify'
 import { GetProfileUseCase } from '../use-cases/get-profile.use-case'
 import { UpdateProfileUseCase } from '../use-cases/update-profile.use-case'
 import { PrismaUserProfileRepository } from '../repositories/user-profile.repo'
-import { authenticate } from '../../../core/middleware/authenticate'
+import { authenticate, requireUser } from '../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../core/http/envelope'
 import {
   profileJsonSchema,
@@ -16,7 +16,7 @@ import {
  * the user can only access their own profile via `request.user.sub`.
  * There is no `:userId` param to prevent IDOR.
  */
-export function registerUserRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
+export function registerUserRoutes(fastify: AppFastifyInstance): void {
   const userProfileRepo = new PrismaUserProfileRepository(fastify.db.primary)
 
   const getProfileUseCase = new GetProfileUseCase({
@@ -34,7 +34,7 @@ export function registerUserRoutes(fastify: FastifyInstance<any, any, any, any, 
     schema: profileJsonSchema,
     preHandler: [authenticate],
   }, async (request) => {
-    const profile = await getProfileUseCase.execute(request.user!.sub)
+    const profile = await getProfileUseCase.execute(requireUser(request).sub)
 
     return successEnvelope(
       {
@@ -57,7 +57,7 @@ export function registerUserRoutes(fastify: FastifyInstance<any, any, any, any, 
       audit: { action: 'update_profile', resourceType: 'user' },
     },
   }, async (request) => {
-    const profile = await updateProfileUseCase.execute(request.user!.sub, request.body)
+    const profile = await updateProfileUseCase.execute(requireUser(request).sub, request.body)
 
     return successEnvelope(
       {

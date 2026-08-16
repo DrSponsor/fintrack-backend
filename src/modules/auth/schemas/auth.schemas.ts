@@ -172,10 +172,15 @@ export const googleAuthJsonSchema = {
         data: {
           type: 'object',
           additionalProperties: false,
-          required: ['userId', 'accessToken', 'expiresIn'],
+          // refreshToken is included here (not just as an httpOnly cookie)
+          // because native mobile clients don't persist cookies across
+          // requests by default — the body-based token is what
+          // TokenManager/the refresh interceptor actually use.
+          required: ['userId', 'accessToken', 'refreshToken', 'expiresIn'],
           properties: {
             userId: { type: 'string', format: 'uuid' },
             accessToken: { type: 'string' },
+            refreshToken: { type: 'string' },
             expiresIn: { type: 'number' },
           },
         },

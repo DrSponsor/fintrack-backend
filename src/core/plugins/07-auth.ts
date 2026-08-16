@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyInstance, FastifyPluginCallback } from 'fastify'
+import type { AppFastifyInstance } from '../../types/fastify'
 import type { AppConfig } from '../../config'
 import { verifyAccessToken } from '../crypto/tokens'
 import { unauthenticated } from '../errors/factories'
@@ -21,7 +21,7 @@ function extractBearerToken(header: string | undefined): string | null {
   return token
 }
 
-export const authPlugin = fp((fastify: FastifyInstance<any, any, any, any, any>, options: AuthPluginOptions, done) => {
+export const authPlugin = fp((fastify: AppFastifyInstance, options: AuthPluginOptions, done) => {
   fastify.decorateRequest('user')
 
   fastify.addHook('preHandler', async (request) => {

@@ -53,14 +53,14 @@ describe('FcmProvider', () => {
     // Mock OAuth token exchange
     fetchSpy.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ access_token: 'fake-access-token', expires_in: 3600 }),
-    } as Response)
+      json: () => Promise.resolve({ access_token: 'fake-access-token', expires_in: 3600 }),
+    })
 
     // Mock FCM send request
     fetchSpy.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ name: 'projects/test-project/messages/123' }),
-    } as Response)
+      json: () => Promise.resolve({ name: 'projects/test-project/messages/123' }),
+    })
 
     await provider.sendPush({ token: 'device-token', title: 'Hello', body: 'World' })
 
@@ -89,8 +89,8 @@ describe('FcmProvider', () => {
     fetchSpy.mockResolvedValue({
       ok: false,
       status: 500,
-      text: async () => 'Internal Error',
-    } as Response)
+      text: () => Promise.resolve('Internal Error'),
+    })
 
     // Fire multiple times to trip breaker
     for (let i = 0; i < 10; i++) {
@@ -143,8 +143,8 @@ describe('PostmarkProvider', () => {
 
     fetchSpy.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ Message: 'OK', ErrorCode: 0 }),
-    } as Response)
+      json: () => Promise.resolve({ Message: 'OK', ErrorCode: 0 }),
+    })
 
     await provider.sendEmail({ to: 'user@fintrack.ng', subject: 'Alert', htmlBody: '<p>Hi</p>' })
 

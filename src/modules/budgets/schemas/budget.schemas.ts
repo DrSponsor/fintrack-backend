@@ -12,6 +12,12 @@ export const createBudgetBodySchema = z.object({
 
 export type CreateBudgetBody = z.infer<typeof createBudgetBodySchema>
 
+export const updateBudgetBodySchema = z.object({
+  limitKobo: z.string().regex(/^\d+$/, 'limitKobo must be a positive numeric string representing kobo'),
+}).strict()
+
+export type UpdateBudgetBody = z.infer<typeof updateBudgetBodySchema>
+
 // ──────────────────────────────────────────────────────────────────
 // JSON Schemas (Fastify compiled serialiser)
 // ──────────────────────────────────────────────────────────────────
@@ -64,6 +70,37 @@ export const listBudgetsJsonSchema = {
       properties: {
         success: { type: 'boolean', const: true },
         data: { type: 'array', items: budgetObject },
+        requestId: { type: 'string' },
+      },
+    },
+  },
+} as const
+
+export const updateBudgetJsonSchema = {
+  params: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['id'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+    },
+  },
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['limitKobo'],
+    properties: {
+      limitKobo: { type: 'string', pattern: '^\\d+$' },
+    },
+  },
+  response: {
+    200: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['success', 'data', 'requestId'],
+      properties: {
+        success: { type: 'boolean', const: true },
+        data: budgetObject,
         requestId: { type: 'string' },
       },
     },

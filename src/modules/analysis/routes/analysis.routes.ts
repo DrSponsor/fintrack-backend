@@ -1,5 +1,5 @@
-import type { FastifyInstance } from 'fastify'
-import { authenticate } from '../../../core/middleware/authenticate'
+import type { AppFastifyInstance } from '../../../types/fastify'
+import { authenticate, requireUser } from '../../../core/middleware/authenticate'
 import { GetWeeklyReportUseCase } from '../use-cases/get-weekly-report.use-case'
 import { GetMonthlyReportUseCase } from '../use-cases/get-monthly-report.use-case'
 import { PrismaAnalysisRepository } from '../repositories/analysis.repo'
@@ -12,7 +12,7 @@ import {
 } from '../schemas/analysis.schemas'
 import { successEnvelope } from '../../../core/http/envelope'
 
-export function registerAnalysisRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
+export function registerAnalysisRoutes(fastify: AppFastifyInstance): void {
   const analysisRepo = new PrismaAnalysisRepository(fastify.db.primary, fastify.db.read)
 
   const getWeeklyReportUseCase = new GetWeeklyReportUseCase({
@@ -35,7 +35,7 @@ export function registerAnalysisRoutes(fastify: FastifyInstance<any, any, any, a
     const query = getWeeklyReportQuerySchema.parse(request.query)
     const weekStart = parseISOWeek(query.week)
 
-    const result = await getWeeklyReportUseCase.execute(request.user!.sub, weekStart)
+    const result = await getWeeklyReportUseCase.execute(requireUser(request).sub, weekStart)
 
     if (result.type === 'FOUND') {
       return reply.code(200).send(successEnvelope(result.report, request.requestId))
@@ -61,7 +61,7 @@ export function registerAnalysisRoutes(fastify: FastifyInstance<any, any, any, a
     const query = getMonthlyReportQuerySchema.parse(request.query)
     const monthStart = parseISOMonth(query.month)
 
-    const result = await getMonthlyReportUseCase.execute(request.user!.sub, monthStart)
+    const result = await getMonthlyReportUseCase.execute(requireUser(request).sub, monthStart)
 
     if (result.type === 'FOUND') {
       return reply.code(200).send(successEnvelope(result.report, request.requestId))

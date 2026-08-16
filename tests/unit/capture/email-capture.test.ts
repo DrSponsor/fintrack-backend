@@ -1,5 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { randomUUID } from 'node:crypto'
+import { describe, expect, it, vi } from 'vitest'
 import { SafetyFilterService } from '../../../src/modules/capture/email/services/safety-filter.service'
 import { GtbParser } from '../../../src/modules/capture/email/parsers/gtb.parser'
 import { AccessParser } from '../../../src/modules/capture/email/parsers/access.parser'
@@ -193,10 +192,10 @@ describe('DiscoveryService', () => {
     })
 
     // Mock global fetch to return a list of history records
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      return {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      return Promise.resolve({
         ok: true,
-        json: async () => ({
+        json: () => Promise.resolve({
           historyId: '98765',
           history: [
             {
@@ -208,7 +207,7 @@ describe('DiscoveryService', () => {
             },
           ],
         }),
-      } as any
+      } as any)
     })
 
     const latestHistoryId = await discovery.syncHistory('account-1', '54321', 'fake-access-token', null)
@@ -244,12 +243,15 @@ describe('EmailIngestWorker', () => {
       fetchEmailWithBackoff: vi.fn().mockRejectedValue(new GmailQuotaExhaustedError()),
     } as any
 
+    const mockEmailAccessLogRepo = { create: vi.fn() } as any
+
     const worker = new EmailIngestWorker({
-      connection: {} as any,
+      connection: {},
       concurrency: 1,
       prisma: {} as any,
       accountRepo: mockAccountRepo,
       transactionRepo: {} as any,
+      emailAccessLogRepo: mockEmailAccessLogRepo,
       oauthService: mockOauthService,
       fetchService: mockFetchService,
       safetyFilter: {} as any,
@@ -278,5 +280,184 @@ describe('EmailIngestWorker', () => {
       { accountId: 'account-1', messageId: 'msg-1' },
       { delay: 2 * 60 * 60 * 1000, jobId: 'quota:msg-1' },
     )
+    // No email was successfully accessed yet (fetch failed) — nothing to log.
+    expect(mockEmailAccessLogRepo.create).not.toHaveBeenCalled()
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // Email access log — NDPR transparency requirement
+  // ────────────────────────────────────────────────────────────────
+  describe('email access logging', () => {
+    const baseEmail = {
+      id: 'gmail-msg-1',
+      subject: 'Debit Alert',
+      from: 'alerts@gtbank.com',
+      senderEmail: 'alerts@gtbank.com',
+      senderDomain: 'gtbank.com',
+      date: new Date(),
+      bodyHtml: '<p>body</p>',
+      bodyText: 'body',
+    }
+
+    function makeDeps(overrides: Record<string, any> = {}) {
+      const mockEmailAccessLogRepo = { create: vi.fn() }
+      const deps = {
+        connection: {} as any,
+        concurrency: 1,
+        prisma: { user: { findUnique: vi.fn().mockResolvedValue({ tier: 'FREE' }) } } as any,
+        accountRepo: {
+          findById: vi.fn().mockResolvedValue({
+            id: 'account-1',
+            userId: 'user-1',
+            gmailConnected: true,
+            accountLast4: '1234',
+          }),
+        } as any,
+        transactionRepo: { create: vi.fn().mockResolvedValue({ id: 'tx-1' }) } as any,
+        emailAccessLogRepo: mockEmailAccessLogRepo as any,
+        oauthService: { getValidAccessToken: vi.fn().mockResolvedValue('fake-access-token') } as any,
+        fetchService: { fetchEmailWithBackoff: vi.fn().mockResolvedValue(baseEmail) } as any,
+        safetyFilter: {
+          shouldDiscard: vi.fn().mockReturnValue(false),
+          hasTransactionKeywords: vi.fn().mockReturnValue(true),
+        } as any,
+        parserRegistry: { getParserForDomain: vi.fn().mockReturnValue(null) } as any,
+        aiUniversalParser: {
+          parse: vi.fn().mockResolvedValue({
+            tx: {
+              merchantName: 'POS Purchase',
+              amountKobo: 100000n,
+              type: 'DEBIT',
+              transactionDate: new Date(),
+              balanceAfterKobo: 500000n,
+            },
+            isVerified: false,
+          }),
+        } as any,
+        discoveryService: {} as any,
+        normalizer: {
+          normalizeMerchantName: vi.fn((n: string) => n),
+          getMerchantFingerprint: vi.fn().mockReturnValue('fingerprint-1'),
+        } as any,
+        categorizer: { categorize: vi.fn().mockResolvedValue('category-1') } as any,
+        deduplicator: {
+          getTransactionHash: vi.fn().mockReturnValue('hash-1'),
+          findDuplicate: vi.fn().mockResolvedValue(null),
+          trackTransaction: vi.fn(),
+        } as any,
+        logger: mockLogger,
+        captureEmailQueue: { add: vi.fn() } as any,
+        ...overrides,
+      }
+      return { deps, mockEmailAccessLogRepo }
+    }
+
+    const mockJob = {
+      name: 'ingest-message',
+      data: { accountId: 'account-1', messageId: 'gmail-msg-1' },
+    } as any
+
+    it('logs TRANSACTION_CREATED on successful ingestion', async () => {
+      const { deps, mockEmailAccessLogRepo } = makeDeps()
+      const worker = new EmailIngestWorker(deps)
+
+      await (worker as any).processJob(mockJob)
+
+      expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith({
+        userId: 'user-1',
+        accountId: 'account-1',
+        messageId: 'gmail-msg-1',
+        senderDomain: 'gtbank.com',
+        subject: 'Debit Alert',
+        outcome: 'TRANSACTION_CREATED',
+      })
+    })
+
+    it('logs DISCARDED_SAFETY_FILTER when the safety gate discards the email', async () => {
+      const { deps, mockEmailAccessLogRepo } = makeDeps({
+        safetyFilter: {
+          shouldDiscard: vi.fn().mockReturnValue(true),
+          hasTransactionKeywords: vi.fn().mockReturnValue(true),
+        },
+      })
+      const worker = new EmailIngestWorker(deps)
+
+      await (worker as any).processJob(mockJob)
+
+      expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'DISCARDED_SAFETY_FILTER' }),
+      )
+    })
+
+    it('logs DISCARDED_NO_KEYWORDS when no transaction keywords are found', async () => {
+      const { deps, mockEmailAccessLogRepo } = makeDeps({
+        safetyFilter: {
+          shouldDiscard: vi.fn().mockReturnValue(false),
+          hasTransactionKeywords: vi.fn().mockReturnValue(false),
+        },
+      })
+      const worker = new EmailIngestWorker(deps)
+
+      await (worker as any).processJob(mockJob)
+
+      expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'DISCARDED_NO_KEYWORDS' }),
+      )
+    })
+
+    it('logs PARSE_FAILED when no parser can extract a transaction', async () => {
+      const { deps, mockEmailAccessLogRepo } = makeDeps({
+        aiUniversalParser: { parse: vi.fn().mockResolvedValue({ tx: null, isVerified: false }) },
+      })
+      const worker = new EmailIngestWorker(deps)
+
+      await (worker as any).processJob(mockJob)
+
+      expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'PARSE_FAILED' }),
+      )
+    })
+
+    it('logs DUPLICATE_SUPPRESSED when the deduplicator finds an existing match', async () => {
+      const { deps, mockEmailAccessLogRepo } = makeDeps({
+        deduplicator: {
+          getTransactionHash: vi.fn().mockReturnValue('hash-1'),
+          findDuplicate: vi.fn().mockResolvedValue('existing-tx-id'),
+          trackTransaction: vi.fn(),
+        },
+      })
+      const worker = new EmailIngestWorker(deps)
+
+      await (worker as any).processJob(mockJob)
+
+      expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'DUPLICATE_SUPPRESSED' }),
+      )
+    })
+
+    it('logs DUPLICATE_SUPPRESSED when a concurrent write hits the DB unique constraint', async () => {
+      const { deps, mockEmailAccessLogRepo } = makeDeps({
+        transactionRepo: {
+          create: vi.fn().mockRejectedValue({ code: 'P2002' }),
+        },
+      })
+      const worker = new EmailIngestWorker(deps)
+
+      await (worker as any).processJob(mockJob)
+
+      expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'DUPLICATE_SUPPRESSED' }),
+      )
+    })
+
+    it('does not let a logging failure break transaction ingestion', async () => {
+      const { deps, mockEmailAccessLogRepo } = makeDeps()
+      mockEmailAccessLogRepo.create.mockRejectedValue(new Error('DB write failed'))
+      const worker = new EmailIngestWorker(deps)
+
+      // Should not throw, despite the logging call failing internally.
+      await expect((worker as any).processJob(mockJob)).resolves.toBeUndefined()
+      expect(deps.transactionRepo.create).toHaveBeenCalledOnce()
+    })
   })
 })

@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginCallback } from 'fastify'
+import type { AppFastifyPluginCallback } from '../../types/fastify'
 import { ZodError } from 'zod'
 import { AppError } from '../errors/AppError'
 import { ERROR_CODES } from '../errors/codes'
@@ -9,7 +9,7 @@ function isFastifyValidationError(error: Error): boolean {
   return 'validation' in error && Array.isArray((error as { readonly validation?: unknown }).validation)
 }
 
-const plugin: FastifyPluginCallback = (fastify, _options, done) => {
+const plugin: AppFastifyPluginCallback = (fastify, _options, done) => {
   fastify.setErrorHandler<Error>((error, request, reply) => {
     if (error instanceof AppError) {
       const envelope: ErrorEnvelope = {

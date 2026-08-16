@@ -1,7 +1,7 @@
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import fp from 'fastify-plugin'
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
+import type { AppFastifyInstance } from '../../types/fastify'
 import type { AppConfig } from '../../config'
 import { AppError } from '../errors/AppError'
 import { ERROR_CODES } from '../errors/codes'
@@ -12,7 +12,7 @@ export type SecurityPluginOptions = {
 
 const methodsWithBody = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
-export const securityPlugin = fp(async (fastify: FastifyInstance<any, any, any, any, any>, options: SecurityPluginOptions) => {
+export const securityPlugin = fp(async (fastify: AppFastifyInstance, options: SecurityPluginOptions) => {
   await fastify.register(helmet, {
     global: true,
     contentSecurityPolicy: false,

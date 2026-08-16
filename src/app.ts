@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import Fastify from 'fastify'
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from './types/fastify'
 import type { Redis } from 'ioredis'
 import { loadConfig } from './config'
 import type { AppConfig } from './config'
@@ -49,7 +49,7 @@ export type AppFactoryOptions = {
   readonly runWorkers?: boolean
 }
 
-export async function buildApp(options: AppFactoryOptions = {}): Promise<FastifyInstance<any, any, any, any, any>> {
+export async function buildApp(options: AppFactoryOptions = {}): Promise<AppFastifyInstance> {
   const appConfig = options.appConfig ?? loadConfig()
   const logger = createLogger(appConfig)
 

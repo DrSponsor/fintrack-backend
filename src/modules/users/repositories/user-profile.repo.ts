@@ -60,7 +60,7 @@ export class PrismaUserProfileRepository implements IUserProfileRepository {
       id: user.id,
       email: user.email,
       phone: user.phone,
-      tier: user.tier as Tier,
+      tier: user.tier,
       accountCount: user._count.accounts,
       createdAt: user.createdAt,
     }
@@ -86,7 +86,7 @@ export class PrismaUserProfileRepository implements IUserProfileRepository {
       id: user.id,
       email: user.email,
       phone: user.phone,
-      tier: user.tier as Tier,
+      tier: user.tier,
       accountCount: user._count.accounts,
       createdAt: user.createdAt,
     }

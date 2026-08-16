@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { AppFastifyInstance } from '../../../../types/fastify'
 import { z } from 'zod'
 import { ConnectGmailUseCase } from '../services/connect-gmail.use-case'
 import { DisconnectGmailUseCase } from '../services/disconnect-gmail.use-case'
@@ -6,7 +6,7 @@ import { ProcessGmailWebhookUseCase } from '../services/process-gmail-webhook.us
 import { OAuthService } from '../services/oauth.service'
 import { WatchService } from '../services/watch.service'
 import { PrismaAccountRepository } from '../../../accounts/repositories/account.repo'
-import { authenticate } from '../../../../core/middleware/authenticate'
+import { authenticate, requireUser } from '../../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../../core/http/envelope'
 import { validationError } from '../../../../core/errors/factories'
 
@@ -33,7 +33,7 @@ const gmailDecodedDataSchema = z.object({
   historyId: z.union([z.number(), z.string()]),
 }).strict()
 
-export function registerEmailCaptureRoutes(fastify: FastifyInstance<any, any, any, any, any>): void {
+export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
   const accountRepo = new PrismaAccountRepository(fastify.db.primary)
   const oauthService = new OAuthService(fastify.appConfig, accountRepo, fastify.log)
   const watchService = new WatchService(fastify.appConfig, fastify.log)
@@ -98,7 +98,7 @@ export function registerEmailCaptureRoutes(fastify: FastifyInstance<any, any, an
       }
 
       const { accountId, code } = parsed.data
-      const { email } = await connectGmailUseCase.execute(request.user!.sub, accountId, code)
+      const { email } = await connectGmailUseCase.execute(requireUser(request).sub, accountId, code)
 
       return reply.code(200).send(successEnvelope({ email }, request.requestId))
     },
@@ -139,7 +139,7 @@ export function registerEmailCaptureRoutes(fastify: FastifyInstance<any, any, an
       }
 
       const { accountId } = parsed.data
-      await disconnectGmailUseCase.execute(request.user!.sub, accountId)
+      await disconnectGmailUseCase.execute(requireUser(request).sub, accountId)
 
       return reply.code(200).send(successEnvelope(null, request.requestId))
     },

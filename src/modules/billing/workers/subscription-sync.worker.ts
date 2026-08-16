@@ -14,7 +14,7 @@ export async function runSubscriptionSync(deps: SubscriptionSyncDeps): Promise<v
   const active = await deps.subscriptionRepo.findActiveSubscriptions()
   deps.logger.info({ count: active.length }, 'sync: starting active subscription sync run')
 
-  const tasks = active.map((sub) => async () => {
+  const tasks = active.map((sub): (() => Promise<void>) => async () => {
     try {
       const remote = await deps.billingProvider.getSubscription(sub.providerSubscriptionId)
 
@@ -47,7 +47,7 @@ async function limitConcurrency(tasks: (() => Promise<void>)[], limit: number): 
     p.then(() => {
       const idx = executing.indexOf(p)
       if (idx !== -1) {
-        executing.splice(idx, 1)
+        void executing.splice(idx, 1)
       }
     }).catch(() => {})
 

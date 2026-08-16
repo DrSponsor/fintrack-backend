@@ -34,8 +34,10 @@ export class DeepSeekProvider implements IAIProvider {
     // Set initial state to closed (0)
     circuitBreakerStateGauge.set({ name: 'deepseek' }, 0)
 
-    // Setup action-specific fallback values when the circuit is open or requests fail
-    this.breaker.fallback((_err: Error, action: string) => {
+    // Setup action-specific fallback values when the circuit is open or requests fail.
+    // opossum calls this with the original .fire() args first, error last —
+    // see the comment on CircuitBreaker.fallback in src/types/opossum.d.ts.
+    this.breaker.fallback((action: string, _systemPrompt: string, _userPrompt: string, _err: Error) => {
       if (action === 'categorize') {
         return JSON.stringify({ category: 'uncategorised', confidence: 0 })
       }

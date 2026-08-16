@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin'
-import type { FastifyInstance, FastifyPluginCallback } from 'fastify'
+import type { AppFastifyInstance } from '../../types/fastify'
 import type { AppConfig } from '../../config'
 import { createRedisClient } from '../../config/redis'
 import type { RedisClient } from '../../config/redis'
@@ -9,7 +9,7 @@ export type RedisPluginOptions = {
   readonly redis?: RedisClient
 }
 
-export const redisPlugin = fp((fastify: FastifyInstance<any, any, any, any, any>, options: RedisPluginOptions, done) => {
+export const redisPlugin = fp((fastify: AppFastifyInstance, options: RedisPluginOptions, done) => {
   const redis = options.redis ?? createRedisClient(options.appConfig)
   fastify.decorate('redis', redis)
 

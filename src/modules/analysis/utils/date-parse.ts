@@ -1,10 +1,11 @@
 export function parseISOWeek(weekStr: string): Date {
   const match = weekStr.match(/^(\d{4})-W(\d{2})$/)
-  if (!match) {
+  const [, yearStr, weekNumStr] = match ?? []
+  if (yearStr === undefined || weekNumStr === undefined) {
     throw new Error('Invalid ISO week format')
   }
-  const year = parseInt(match[1]!, 10)
-  const week = parseInt(match[2]!, 10)
+  const year = parseInt(yearStr, 10)
+  const week = parseInt(weekNumStr, 10)
 
   // Jan 4th is always in ISO Week 1 of that year
   const jan4 = new Date(Date.UTC(year, 0, 4, 0, 0, 0, 0))
@@ -19,10 +20,11 @@ export function parseISOWeek(weekStr: string): Date {
 
 export function parseISOMonth(monthStr: string): Date {
   const match = monthStr.match(/^(\d{4})-(\d{2})$/)
-  if (!match) {
+  const [, yearStr, monthStr2] = match ?? []
+  if (yearStr === undefined || monthStr2 === undefined) {
     throw new Error('Invalid ISO month format')
   }
-  const year = parseInt(match[1]!, 10)
-  const month = parseInt(match[2]!, 10)
+  const year = parseInt(yearStr, 10)
+  const month = parseInt(monthStr2, 10)
   return new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0))
 }

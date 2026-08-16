@@ -1,10 +1,11 @@
 import fp from 'fastify-plugin'
-import type { FastifyPluginAsync } from 'fastify'
+import type { AppFastifyPluginAsync } from '../../types/fastify'
 import { registerManualCaptureRoutes } from './manual/routes/manual-capture.routes'
 import { registerEmailCaptureRoutes } from './email/routes/email-capture.routes'
 import { PrismaAccountRepository } from '../accounts/repositories/account.repo'
 import { PrismaTransactionRepository } from '../transactions/repositories/transaction.repo'
 import { PrismaCategorizationRepository } from '../transactions/repositories/categorization.repo'
+import { PrismaEmailAccessLogRepository } from './email/repositories/email-access-log.repo'
 import { OAuthService } from './email/services/oauth.service'
 import { FetchService } from './email/services/fetch.service'
 import { SafetyFilterService } from './email/services/safety-filter.service'
@@ -18,7 +19,6 @@ import { EmailIngestWorker } from './email/workers/email-ingest.worker'
 import { WatchRenewalWorker } from './email/workers/watch-renewal.worker'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
 import { WatchService } from './email/services/watch.service'
-import type { AppLogger } from '../../core/logger'
 
 // Concrete Bank Parsers
 import { GtbParser } from './email/parsers/gtb.parser'
@@ -32,8 +32,8 @@ import { MoniepointParser } from './email/parsers/moniepoint.parser'
 import { WemaParser } from './email/parsers/wema.parser'
 import { FidelityParser } from './email/parsers/fidelity.parser'
 
-const captureModule: FastifyPluginAsync = async (fastify) => {
-  const logger = fastify.log as unknown as AppLogger
+const captureModule: AppFastifyPluginAsync = async (fastify) => {
+  const logger = fastify.log
 
   // 1. Fetch categories to build name -> id map for AI categorization
   const categories = await fastify.db.primary.category.findMany({
@@ -54,6 +54,7 @@ const captureModule: FastifyPluginAsync = async (fastify) => {
   const accountRepo = new PrismaAccountRepository(fastify.db.primary)
   const transactionRepo = new PrismaTransactionRepository(fastify.db.primary)
   const mappingRepo = new PrismaCategorizationRepository(fastify.db.primary)
+  const emailAccessLogRepo = new PrismaEmailAccessLogRepository(fastify.db.primary)
   const oauthService = new OAuthService(fastify.appConfig, accountRepo, logger)
   const fetchService = new FetchService(logger)
   const safetyFilter = new SafetyFilterService()
@@ -104,6 +105,7 @@ const captureModule: FastifyPluginAsync = async (fastify) => {
       prisma: fastify.db.primary,
       accountRepo,
       transactionRepo,
+      emailAccessLogRepo,
       oauthService,
       fetchService,
       safetyFilter,
