@@ -45,7 +45,15 @@ export class OAuthService {
     return response
   }
 
-  public getConsentUrl(): string {
+  /**
+   * Builds the Google consent URL.
+   *
+   * `state` is required rather than optional. An OAuth authorization request
+   * without it has no way to prove the redirect it later receives belongs to
+   * the request it made, and making the parameter optional is the reliable way
+   * to end up with a caller that omits it.
+   */
+  public getConsentUrl(state: string): string {
     const clientId = this.config.googleClientId ?? ''
     const redirectUri = this.config.googleRedirectUri ?? ''
     const scope = encodeURIComponent('https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email')
@@ -56,7 +64,10 @@ export class OAuthService {
       `response_type=code&` +
       `scope=${scope}&` +
       `access_type=offline&` +
-      `prompt=consent`
+      `prompt=consent&` +
+      // Echoed back untouched by Google on the redirect. The client generates
+      // it, holds it, and rejects any redirect whose state does not match.
+      `state=${encodeURIComponent(state)}`
   }
 
   public async exchangeCodeAndSave(accountId: string, code: string): Promise<{ readonly email: string }> {

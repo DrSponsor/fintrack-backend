@@ -1,4 +1,5 @@
 import type { AppFastifyInstance } from '../../../../types/fastify'
+import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { ConnectGmailUseCase } from '../services/connect-gmail.use-case'
 import { DisconnectGmailUseCase } from '../services/disconnect-gmail.use-case'
@@ -33,6 +34,48 @@ const gmailDecodedDataSchema = z.object({
   historyId: z.union([z.number(), z.string()]),
 }).strict()
 
+/**
+ * Escapes text destined for HTML.
+ *
+ * Everything interpolated into the callback page arrives in a query string an
+ * attacker can craft, so all of it is untrusted. The ampersand is replaced
+ * FIRST — doing it later would re-escape the ampersands introduced by the other
+ * replacements and emit `&amp;lt;`.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/** Wraps the callback message in a self-contained page. Dark, to match the app
+ *  the user is being handed back to rather than flashing white at them. */
+function page(body: string): string {
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinTrack</title>
+<style>
+  :root { color-scheme: dark }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#080B12; color:#ECEDF2; text-align:center; padding:24px;
+         font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
+  main { max-width:420px }
+  h1 { font-size:22px; letter-spacing:-0.3px; margin:0 0 12px }
+  p { color:#8A90A6; line-height:1.5; margin:0 0 16px }
+  .muted { font-size:13px }
+  code { display:block; background:#171D2E; border:1px solid rgba(255,255,255,.16);
+         border-radius:6px; padding:12px; font-size:12px; word-break:break-all; color:#ECEDF2 }
+  .btn { display:inline-block; background:#F0EDE6; color:#0A0D14; text-decoration:none;
+         padding:14px 24px; border-radius:10px; font-weight:600 }
+</style>
+</head><body><main>${body}</main></body></html>`
+}
+
 export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
   const accountRepo = new PrismaAccountRepository(fastify.db.primary)
   const oauthService = new OAuthService(fastify.appConfig, accountRepo, fastify.log)
@@ -53,6 +96,92 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
   const processGmailWebhookUseCase = new ProcessGmailWebhookUseCase({
     prisma: fastify.db.primary,
     captureEmailQueue: fastify.queues.captureEmail,
+  })
+
+  // 0a. Consent URL — the entry point to the whole flow.
+  //
+  // Nothing previously exposed OAuthService.getConsentUrl, so the client had no
+  // way to BEGIN authorization: the exchange endpoint below existed, but the
+  // step that produces the code it consumes did not.
+  //
+  // The `state` is minted here and returned alongside the URL. The client keeps
+  // it and must refuse any redirect that comes back with a different one.
+  fastify.get(
+    '/v1/capture/email/oauth/url',
+    {
+      preHandler: [authenticate],
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['success', 'data', 'requestId'],
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['consentUrl', 'state'],
+                properties: {
+                  consentUrl: { type: 'string' },
+                  state: { type: 'string' },
+                },
+              },
+              requestId: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const state = randomBytes(16).toString('hex')
+      return reply
+        .code(200)
+        .send(successEnvelope({ consentUrl: oauthService.getConsentUrl(state), state }, request.requestId))
+    },
+  )
+
+  // 0b. Google's redirect target.
+  //
+  // GET and UNAUTHENTICATED, both necessarily: Google completes authorization
+  // by redirecting a browser here, and a browser redirect carries no bearer
+  // token. The POST route below shares this path but not its method, which
+  // Fastify routes independently.
+  //
+  // This endpoint deliberately does NOT exchange the code. It is a relay: it
+  // hands the code back to the app, which then calls the authenticated POST to
+  // perform the exchange. That keeps the exchange tied to a real logged-in
+  // user instead of to whoever can reach a public URL.
+  fastify.get('/v1/capture/email/oauth/callback', async (request, reply) => {
+    const query = request.query as Record<string, string | undefined>
+    const { code, state, error } = query
+
+    const deepLink =
+      code !== undefined && code.length > 0
+        ? `fintrack://oauth/google?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state ?? '')}`
+        : null
+
+    // A 302 to a custom scheme is unreliable — Chrome on Android blocks
+    // scheme redirects that the user did not initiate. So the page tries
+    // automatically AND offers a button, which always counts as user-initiated.
+    const body =
+      error !== undefined
+        ? `<h1>Authorization cancelled</h1><p>${escapeHtml(error)}</p><p>You can close this tab and try again.</p>`
+        : deepLink === null
+          ? `<h1>Missing authorization code</h1><p>Google redirected here without a code. Start the connection again from the app.</p>`
+          : `<h1>Gmail connected</h1>
+             <p>Returning you to FinTrack&hellip;</p>
+             <p><a class="btn" href="${escapeHtml(deepLink)}">Return to FinTrack</a></p>
+             <p class="muted">If the app does not open, paste this code into it:</p>
+             <code>${escapeHtml(code ?? '')}</code>
+             <script>setTimeout(function(){location.href=${JSON.stringify(deepLink)}},400)</script>`
+
+    return reply
+      .code(error !== undefined || deepLink === null ? 400 : 200)
+      .type('text/html; charset=utf-8')
+      // The URL holds a live authorization code — keep it out of every cache.
+      .header('Cache-Control', 'no-store')
+      .send(page(body))
   })
 
   // 1. Google OAuth callback: registers auth code, exchanges for token, and starts watch
