@@ -99,7 +99,7 @@ describe('Report Use Cases', () => {
 
       expect(result.type).toBe('QUEUED')
       if (result.type === 'QUEUED') {
-        expect(result.jobId).toBe('weekly:user-1:2026-06-01')
+        expect(result.jobId).toBe('weekly-user-1-2026-06-01')
       }
       expect(queue.add).toHaveBeenCalledOnce()
     })

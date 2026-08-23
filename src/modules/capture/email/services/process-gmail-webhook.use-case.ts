@@ -1,5 +1,6 @@
 import type { Queue } from 'bullmq'
 import type { PrismaClient } from '../../../../generated/prisma/client'
+import { jobId } from '../../../../core/queue/job-id'
 
 export type ProcessGmailWebhookUseCaseDeps = {
   readonly prisma: PrismaClient
@@ -32,7 +33,7 @@ export class ProcessGmailWebhookUseCase {
           'sync-history',
           { accountId: account.id, historyId },
           {
-            jobId: `sync-history:${account.id}:${historyId}`, // Deduplicate
+            jobId: jobId('sync-history', account.id, historyId), // Deduplicate
           },
         )
         queueCount++

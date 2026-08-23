@@ -4,6 +4,7 @@ import type { IUserRepository } from '../../auth/repositories/user.repo'
 import type { PrismaClient } from '../../../generated/prisma/client'
 import type { AppLogger } from '../../../core/logger'
 import type { QueueRegistry } from '../../../core/queue/queues'
+import { jobId } from '../../../core/queue/job-id'
 
 export type GracePeriodDeps = {
   readonly subscriptionRepo: ISubscriptionRepository
@@ -46,7 +47,7 @@ export async function runGracePeriodDowngrade(deps: GracePeriodDeps): Promise<vo
       await deps.queues.notificationsPush.add(
         'subscription-expired',
         { userId: sub.userId },
-        { jobId: `subscription-expired:${sub.userId}:${Date.now()}` }
+        { jobId: jobId('subscription-expired', sub.userId, Date.now()) }
       )
       
       deps.logger.info({ userId: sub.userId, type: 'subscription_expired' }, 'Downgrade complete. Notification queued.')

@@ -2,6 +2,7 @@ import type { Queue } from 'bullmq'
 import type { IEventBus } from '../../../core/events/event-bus.interface'
 import type { IBudgetRepository } from '../repositories/budget.repo'
 import type { AppLogger } from '../../../core/logger'
+import { jobId } from '../../../core/queue/job-id'
 
 export class BudgetAlertService {
   private readonly budgetRepo: IBudgetRepository
@@ -70,7 +71,7 @@ export class BudgetAlertService {
           },
           {
             // Unique Job ID to collapse duplicate alerts for the same budget during the same period and transaction
-            jobId: `budget-alert:${budget.id}:${transactionId}`,
+            jobId: jobId('budget-alert', budget.id, transactionId),
           },
         )
         this.logger.warn(

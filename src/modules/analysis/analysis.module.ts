@@ -11,6 +11,7 @@ import { WeeklyReportService } from './services/weekly-report.service'
 import { MonthlyReportService } from './services/monthly-report.service'
 import { WeeklyReportWorker, MonthlyReportWorker } from './workers/report.worker'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
+import { jobId } from '../../core/queue/job-id'
 
 const analysisModule: AppFastifyPluginCallback = (fastify, _options, done) => {
   const logger = fastify.log
@@ -125,14 +126,14 @@ const analysisModule: AppFastifyPluginCallback = (fastify, _options, done) => {
       await fastify.cache.delete(cacheKeyMonthly)
 
       // Queue recomputation jobs with 10s delay to collapse bursts
-      const weeklyJobId = `weekly:${payload.userId}:${weekStart.toISOString().split('T')[0]}`
+      const weeklyJobId = jobId('weekly', payload.userId, weekStart.toISOString().split('T')[0] ?? '')
       await fastify.queues.analysisWeekly.add(
         'compute-weekly-report',
         { userId: payload.userId, weekStart: weekStart.toISOString() },
         { jobId: weeklyJobId, delay: 10_000 },
       )
 
-      const monthlyJobId = `monthly:${payload.userId}:${monthStart.toISOString().split('T')[0]}`
+      const monthlyJobId = jobId('monthly', payload.userId, monthStart.toISOString().split('T')[0] ?? '')
       await fastify.queues.analysisMonthly.add(
         'compute-monthly-report',
         { userId: payload.userId, monthStart: monthStart.toISOString() },

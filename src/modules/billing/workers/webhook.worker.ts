@@ -14,6 +14,7 @@ import { NormalizedEventType } from '../providers/billing-provider.interface'
 import type { AppLogger } from '../../../core/logger'
 import { webhooksUnresolvableTotal } from '../../../core/observability/metrics'
 import type { QueueRegistry } from '../../../core/queue/queues'
+import { jobId } from '../../../core/queue/job-id'
 
 export type WebhookJobData = {
   readonly providerEventId: string
@@ -122,7 +123,7 @@ export class BillingWebhookWorker extends BaseWorker<WebhookJobData, void> {
           await this.queues.notificationsPush.add(
             'payment-failed',
             { userId: event.userId },
-            { jobId: `payment-failed:${event.userId}:${Date.now()}` }
+            { jobId: jobId('payment-failed', event.userId, Date.now()) }
           )
           this.logger.info({ userId: event.userId, type: 'payment_failed' }, 'Payment failed. Notification queued.')
           break
@@ -135,7 +136,7 @@ export class BillingWebhookWorker extends BaseWorker<WebhookJobData, void> {
           await this.queues.notificationsPush.add(
             'card-expiring',
             { userId: event.userId },
-            { jobId: `card-expiring:${event.userId}:${Date.now()}` }
+            { jobId: jobId('card-expiring', event.userId, Date.now()) }
           )
           this.logger.info({ userId: event.userId, type: 'card_expiring' }, 'Card expiring. Notification queued.')
           break

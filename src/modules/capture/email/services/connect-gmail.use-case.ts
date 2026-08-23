@@ -3,6 +3,7 @@ import type { WatchService } from './watch.service'
 import type { IAccountRepository } from '../../../accounts/repositories/account.repo'
 import type { Queue } from 'bullmq'
 import { notFound } from '../../../../core/errors/factories'
+import { jobId } from '../../../../core/queue/job-id'
 
 export type ConnectGmailUseCaseDeps = {
   readonly accountRepo: IAccountRepository
@@ -37,7 +38,7 @@ export class ConnectGmailUseCase {
     await this.captureEmailQueue.add(
       'sync-history',
       { accountId, historyId: '0' },
-      { jobId: `sync-history-initial:${accountId}` },
+      { jobId: jobId('sync-history-initial', accountId) },
     )
 
     return { email }

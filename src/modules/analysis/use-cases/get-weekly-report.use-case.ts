@@ -1,6 +1,7 @@
 import type { IAnalysisRepository, ReportRecord } from '../repositories/analysis.repo'
 import type { CacheManager } from '../../../core/cache/cache-manager'
 import type { Queue } from 'bullmq'
+import { jobId as makeJobId } from '../../../core/queue/job-id'
 
 export type GetWeeklyReportResult =
   | { readonly type: 'FOUND'; readonly report: ReportRecord }
@@ -59,7 +60,7 @@ export class GetWeeklyReportUseCase {
     }
 
     // 3. Miss or stale -> Queue calculation job with a 10s delay to collapse bursts
-    const jobId = `weekly:${userId}:${periodStart.toISOString().split('T')[0]}`
+    const jobId = makeJobId('weekly', userId, periodStart.toISOString().split('T')[0] ?? '')
     await this.weeklyQueue.add(
       'compute-weekly-report',
       { userId, weekStart: periodStart.toISOString() },

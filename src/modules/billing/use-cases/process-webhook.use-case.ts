@@ -1,6 +1,7 @@
 import type { IBillingProvider } from '../providers/billing-provider.interface'
 import type { IBillingRepository } from '../repositories/billing.repo'
 import type { QueueRegistry } from '../../../core/queue/queues'
+import { jobId } from '../../../core/queue/job-id'
 
 export type ProcessWebhookDeps = {
   readonly billingProvider: IBillingProvider
@@ -73,7 +74,7 @@ export class ProcessWebhookUseCase {
     await this.queues.billingWebhooks.add(
       'process-webhook',
       { providerEventId },
-      { jobId: providerEventId }
+      { jobId: jobId(providerEventId) }
     )
 
     return { received: true }

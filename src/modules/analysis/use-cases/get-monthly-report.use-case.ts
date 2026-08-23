@@ -1,6 +1,7 @@
 import type { IAnalysisRepository, ReportRecord } from '../repositories/analysis.repo'
 import type { CacheManager } from '../../../core/cache/cache-manager'
 import type { Queue } from 'bullmq'
+import { jobId as makeJobId } from '../../../core/queue/job-id'
 
 export type GetMonthlyReportResult =
   | { readonly type: 'FOUND'; readonly report: ReportRecord }
@@ -58,7 +59,7 @@ export class GetMonthlyReportUseCase {
     }
 
     // 3. Miss or stale -> Queue calculation job with a 10s delay to collapse bursts
-    const jobId = `monthly:${userId}:${periodStart.toISOString().split('T')[0]}`
+    const jobId = makeJobId('monthly', userId, periodStart.toISOString().split('T')[0] ?? '')
     await this.monthlyQueue.add(
       'compute-monthly-report',
       { userId, monthStart: periodStart.toISOString() },

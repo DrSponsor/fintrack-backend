@@ -7,6 +7,7 @@ import type { MonthlyReportService } from '../services/monthly-report.service'
 import type { AppLogger } from '../../../core/logger'
 import type { PrismaClient } from '../../../generated/prisma/client'
 import type { QueueRegistry } from '../../../core/queue/queues'
+import { jobId } from '../../../core/queue/job-id'
 
 export type WeeklyReportJobData = {
   readonly userId: string
@@ -55,7 +56,7 @@ export class WeeklyReportWorker extends BaseWorker<WeeklyReportJobData, void> {
           deps.logger.info({ userCount: users.length, weekStart: weekStartStr }, 'Scheduling weekly report recomputation for all users')
 
           for (const user of users) {
-            const weeklyJobId = `weekly:${user.id}:${weekStartStr.split('T')[0]}`
+            const weeklyJobId = jobId('weekly', user.id, weekStartStr.split('T')[0] ?? '')
             await deps.queues.analysisWeekly.add(
               'compute-weekly-report',
               { userId: user.id, weekStart: weekStartStr },
@@ -103,7 +104,7 @@ export class MonthlyReportWorker extends BaseWorker<MonthlyReportJobData, void> 
           deps.logger.info({ userCount: users.length, monthStart: monthStartStr }, 'Scheduling monthly report recomputation for all users')
 
           for (const user of users) {
-            const monthlyJobId = `monthly:${user.id}:${monthStartStr.split('T')[0]}`
+            const monthlyJobId = jobId('monthly', user.id, monthStartStr.split('T')[0] ?? '')
             await deps.queues.analysisMonthly.add(
               'compute-monthly-report',
               { userId: user.id, monthStart: monthStartStr },

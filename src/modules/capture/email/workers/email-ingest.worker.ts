@@ -17,6 +17,7 @@ import type { NormalizerService } from '../../../transactions/services/normalize
 import type { CategorizerService } from '../../../transactions/services/categorizer.service'
 import type { DeduplicatorService } from '../../../transactions/services/deduplicator.service'
 import type { AppLogger } from '../../../../core/logger'
+import { jobId } from '../../../../core/queue/job-id'
 
 export type EmailIngestJobData =
   | { readonly accountId: string; readonly messageId: string }
@@ -204,7 +205,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
           job.data,
           {
             delay: 2 * 60 * 60 * 1000,
-            jobId: `quota:${messageId}`,
+            jobId: jobId('quota', messageId),
           },
         )
         return // Successfully handled, do not consume retry budget
