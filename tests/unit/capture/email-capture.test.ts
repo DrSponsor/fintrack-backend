@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SafetyFilterService } from '../../../src/modules/capture/email/services/safety-filter.service'
 import { GtbParser } from '../../../src/modules/capture/email/parsers/gtb.parser'
-import { AccessParser } from '../../../src/modules/capture/email/parsers/access.parser'
 import { ZenithParser } from '../../../src/modules/capture/email/parsers/zenith.parser'
 import { UbaParser } from '../../../src/modules/capture/email/parsers/uba.parser'
 import { FirstBankParser } from '../../../src/modules/capture/email/parsers/firstbank.parser'
@@ -62,6 +61,54 @@ describe('SafetyFilterService', () => {
     expect(filter.hasTransactionKeywords('Payment successful')).toBe(true)
     expect(filter.hasTransactionKeywords('Hello world')).toBe(false)
   })
+
+  // ── Regression: the filter used to discard real bank alerts ─────────────
+  //
+  // The tests above all passed a subject and no body, so `bodyText` defaulted
+  // to '' and the body path was never executed. Both bugs below lived entirely
+  // in that unexercised path, and both dropped the exact emails the product
+  // exists to read — silently, logged as "discarded by safety gate", which
+  // reads like the system working correctly.
+
+  /** A real Access Bank alert: the bank's standard security footer, plus the
+   *  kind of tracking pixel every HTML mail carries. */
+  const REAL_BANK_ALERT_BODY =
+    'Debit Alert Amt:NGN4,989.25 Acc:012******345 ' +
+    'Desc:312ABCD2600000AA/MOBILE TRF TO PAY Date:17/08/2026 Avail Bal:NGN200,000.00 ' +
+    '<img src="https://t.example.com/px/a2fa9c1b7e"> ' +
+    'Access Bank will never ask you to disclose your PIN, password or OTP to anyone.'
+
+  it('keeps a real bank alert whose footer mentions OTP', () => {
+    // Bank alerts warn you to protect your OTP every single time. Treating the
+    // word as a security-email marker anywhere in the body meant the filter was
+    // most likely to reject precisely the mail it was built to accept.
+    expect(filter.shouldDiscard('Access Bank Transaction Alert', REAL_BANK_ALERT_BODY)).toBe(false)
+  })
+
+  it('does not match 2fa/mfa/otp inside hex or tracking tokens', () => {
+    // 'a2fa9c1b7e' contains '2fa'. With substring matching, any HTML email
+    // whose tracking URL happened to include those characters was classified
+    // as a two-factor notice.
+    expect(filter.shouldDiscard('Transaction Notification', 'ref a2fa9c1b7e')).toBe(false)
+    expect(filter.shouldDiscard('Transaction Notification', 'id 7mfa22x')).toBe(false)
+    expect(filter.shouldDiscard('Transaction Notification', 'token xotpy9')).toBe(false)
+  })
+
+  it('still discards genuine security mail', () => {
+    // The fix must not blunt the filter: storing an OTP would be far worse
+    // than dropping a transaction.
+    expect(filter.shouldDiscard('Your OTP is 123456', 'Use 123456 to log in')).toBe(true)
+    expect(filter.shouldDiscard('Your 2FA code', 'body')).toBe(true)
+    expect(filter.shouldDiscard('Security alert', 'Someone signed in')).toBe(true)
+    // Unambiguous multi-word phrases are still caught in the body alone.
+    expect(filter.shouldDiscard('Account notice', 'Your verification code is 8891')).toBe(true)
+    expect(filter.shouldDiscard('Account notice', 'Click here to reset your password')).toBe(true)
+  })
+
+  it('finds transaction keywords in a body, not just a subject', () => {
+    expect(filter.hasTransactionKeywords('Notification', REAL_BANK_ALERT_BODY)).toBe(true)
+    expect(filter.hasTransactionKeywords('Notification', 'nothing of interest here')).toBe(false)
+  })
 })
 
 describe('Bank Parsers (Table-Driven)', () => {
@@ -76,16 +123,21 @@ describe('Bank Parsers (Table-Driven)', () => {
       expectedMerchant: 'Transfer from Mom',
       expectedBalance: 1500000n,
     },
-    {
-      parser: new AccessParser(),
-      bank: 'Access Bank',
-      subject: 'Access Bank Alert',
-      body: 'Amt of NGN 10,500.50 Dr; Desc: POS SPAR; Date: 14-Jun-2026; Bal: NGN 4,500.00',
-      expectedAmount: 1050050n,
-      expectedType: 'DEBIT',
-      expectedMerchant: 'POS SPAR',
-      expectedBalance: 450000n,
-    },
+    // Access Bank has moved to tests/unit/capture/access-parser.test.ts, which
+    // exercises the real HTML Access actually sends.
+    //
+    // The fixture that lived here asserted
+    //   'Amt of NGN 10,500.50 Dr; Desc: POS SPAR; Date: 14-Jun-2026; ...'
+    // — semicolon-delimited Label: value pairs. Access sends an HTML table with
+    // no colons and no Amt label at all. The test passed for as long as it
+    // existed while the parser failed on every one of the 41 real alerts in a
+    // live mailbox, because fixture and parser were written from the same
+    // assumption and only ever checked against each other.
+    //
+    // The remaining rows below are the same shape and were written the same
+    // way, so they carry the same risk: passing here is not evidence that any
+    // of them parses real mail. Each needs replacing with a captured alert as
+    // samples become available.
     {
       parser: new ZenithParser(),
       bank: 'Zenith Bank',
@@ -213,8 +265,8 @@ describe('DiscoveryService', () => {
     const latestHistoryId = await discovery.syncHistory('account-1', '54321', 'fake-access-token', null)
     expect(latestHistoryId).toBe('98765')
     expect(mockQueue.add).toHaveBeenCalledTimes(2)
-    expect(mockQueue.add).toHaveBeenNthCalledWith(1, 'ingest-message', { accountId: 'account-1', messageId: 'msg-1' }, { jobId: 'email-ingest:account-1:msg-1' })
-    expect(mockQueue.add).toHaveBeenNthCalledWith(2, 'ingest-message', { accountId: 'account-1', messageId: 'msg-2' }, { jobId: 'email-ingest:account-1:msg-2' })
+    expect(mockQueue.add).toHaveBeenNthCalledWith(1, 'ingest-message', { accountId: 'account-1', messageId: 'msg-1' }, { jobId: 'email-ingest-account-1-msg-1' })
+    expect(mockQueue.add).toHaveBeenNthCalledWith(2, 'ingest-message', { accountId: 'account-1', messageId: 'msg-2' }, { jobId: 'email-ingest-account-1-msg-2' })
 
     fetchSpy.mockRestore()
   })
@@ -278,7 +330,7 @@ describe('EmailIngestWorker', () => {
     expect(mockQueue.add).toHaveBeenCalledWith(
       'ingest-message',
       { accountId: 'account-1', messageId: 'msg-1' },
-      { delay: 2 * 60 * 60 * 1000, jobId: 'quota:msg-1' },
+      { delay: 2 * 60 * 60 * 1000, jobId: 'quota-msg-1' },
     )
     // No email was successfully accessed yet (fetch failed) — nothing to log.
     expect(mockEmailAccessLogRepo.create).not.toHaveBeenCalled()

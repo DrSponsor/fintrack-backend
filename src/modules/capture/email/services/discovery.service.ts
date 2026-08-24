@@ -3,6 +3,18 @@ import type { AppLogger } from '../../../../core/logger'
 import { AppError } from '../../../../core/errors/AppError'
 import { ERROR_CODES } from '../../../../core/errors/codes'
 import { tokenRevoked } from '../../../../core/errors/factories'
+import { jobId } from '../../../../core/queue/job-id'
+
+/**
+ * How far back the FIRST sync reaches. Only used when an account has no
+ * transactions yet; every later sync resumes from the newest one stored.
+ *
+ * Ninety days covers a full quarter, so a user sees three monthly cycles the
+ * moment they connect rather than an empty screen. Larger windows mostly add
+ * ingestion cost: each message is a separate Gmail fetch and a queued job, and
+ * bank alert volume makes a year of history thousands of jobs on first connect.
+ */
+const INITIAL_BACKFILL_DAYS = 90
 
 export type DiscoveryServiceDeps = {
   readonly captureEmailQueue: Queue
@@ -121,8 +133,26 @@ export class DiscoveryService {
     accessToken: string,
     lastTxDate: Date | null,
   ): Promise<string | null> {
-    // Determine the "after" query. If lastTxDate exists, use it. Otherwise, query from last 24 hours.
-    const sinceDate = lastTxDate ? new Date(lastTxDate.getTime() - 3600_000) : new Date(Date.now() - 24 * 3600_000)
+    // Two different situations, and they want very different windows.
+    //
+    // CATCHING UP (lastTxDate set): look back one hour further than the newest
+    // transaction already stored. The overlap covers alerts that arrived while
+    // a sync was mid-flight; ingestion is idempotent on message id, so
+    // re-seeing a message costs nothing.
+    //
+    // FIRST SYNC (lastTxDate null): this is the initial backfill, and it was
+    // asking for 24 HOURS. A new user connecting their mailbox would see
+    // whatever happened to arrive yesterday and nothing else — an empty app
+    // and no way to tell whether it was broken or simply a quiet day. Email is
+    // the one capture channel that CAN see the past, and a one-day window threw
+    // that entire advantage away.
+    //
+    // Gmail's own retention is the only real ceiling, so the window is set by
+    // what makes the product useful on day one: enough history to show spending
+    // patterns and populate a monthly view immediately.
+    const sinceDate = lastTxDate
+      ? new Date(lastTxDate.getTime() - 3600_000)
+      : new Date(Date.now() - INITIAL_BACKFILL_DAYS * 24 * 3600_000)
     // Format as YYYY/MM/DD
     const yyyy = sinceDate.getFullYear()
     const mm = String(sinceDate.getMonth() + 1).padStart(2, '0')
@@ -196,7 +226,7 @@ export class DiscoveryService {
         'ingest-message',
         { accountId, messageId },
         {
-          jobId: `email-ingest:${accountId}:${messageId}`, // Deduplicate
+          jobId: jobId('email-ingest', accountId, messageId), // Deduplicate
         },
       )
     }

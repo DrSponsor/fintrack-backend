@@ -33,10 +33,29 @@ export class CategorizerService {
     this.logger = deps.logger
   }
 
+  /**
+   * The id of the `uncategorised` category — every tier below falls back to it.
+   *
+   * This used to substitute the literal string 'uncategorised' when the lookup
+   * found nothing. `Transaction.categoryId` is a non-nullable `@db.Uuid`, so
+   * that sentinel could never be written: Postgres rejected it with
+   * `invalid input syntax for type uuid`, and the ingest job failed AFTER the
+   * email had been fetched and parsed successfully.
+   *
+   * The failure pointed at transaction.repo, several layers from the cause,
+   * which was simply that the categories table had never been seeded. Throwing
+   * here names the real problem instead: a missing seed is a broken install,
+   * not a per-transaction error to paper over.
+   */
   private async getUncategorisedId(): Promise<string> {
     if (this.uncategorisedId === null) {
       const id = await this.mappingRepo.findUncategorisedId()
-      this.uncategorisedId = id ?? 'uncategorised'
+      if (id === null) {
+        throw new Error(
+          "Category 'uncategorised' is missing. The categories table has not been seeded — run `npm run prisma:seed`.",
+        )
+      }
+      this.uncategorisedId = id
     }
     return this.uncategorisedId
   }
