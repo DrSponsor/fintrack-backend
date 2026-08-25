@@ -167,6 +167,10 @@ model UserMerchantPreference {
 
   @@unique([userId, merchantFingerprint])
   @@index([categoryId])
+  // Consensus is counted by fingerprint across ALL users. The unique index
+  // above leads with userId, so it cannot serve that query — without this,
+  // every correction triggers a sequential scan of the whole table.
+  @@index([merchantFingerprint])
   @@map("user_merchant_preferences")
 }
 

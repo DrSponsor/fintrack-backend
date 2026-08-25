@@ -7,6 +7,8 @@ import {
 import { PrismaTransactionRepository } from '../repositories/transaction.repo'
 import { PrismaCategoryRepository } from '../../categories/repositories/category.repo'
 import { NormalizerService } from '../services/normalizer.service'
+import { MerchantConsensusService } from '../services/merchant-consensus.service'
+import { PrismaCategorizationRepository } from '../repositories/categorization.repo'
 import { authenticate, requireUser } from '../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../core/http/envelope'
 import {
@@ -22,11 +24,17 @@ export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
 
   const listTransactionsUseCase = new ListTransactionsUseCase({ transactionRepo })
   const getTransactionUseCase = new GetTransactionUseCase({ transactionRepo })
+  const consensus = new MerchantConsensusService({
+    repo: new PrismaCategorizationRepository(fastify.db.primary),
+    logger: fastify.log,
+  })
+
   const correctCategoryUseCase = new CorrectCategoryUseCase({
     transactionRepo,
     categoryRepo,
     normalizer,
     logger: fastify.log,
+    consensus,
   })
 
   // ── GET /v1/transactions ──────────────────────────────────────────

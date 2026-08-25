@@ -2,6 +2,7 @@ import { notFound, validationError } from '../../../core/errors/factories'
 import type { ITransactionRepository, TransactionRecord, ListTransactionsFilter } from '../repositories/transaction.repo'
 import type { ICategoryRepository } from '../../categories/repositories/category.repo'
 import type { NormalizerService } from '../services/normalizer.service'
+import type { MerchantConsensusService } from '../services/merchant-consensus.service'
 import { listTransactionsQuerySchema, correctCategoryBodySchema } from '../schemas/transaction.schemas'
 import type { AppLogger } from '../../../core/logger'
 
@@ -68,12 +69,18 @@ export class CorrectCategoryUseCase {
   private readonly categoryRepo: ICategoryRepository
   private readonly normalizer: NormalizerService
   private readonly logger: AppLogger
+  /** Optional so existing construction sites and tests need no change; when
+   *  absent, corrections simply never promote to the shared map. */
+  private readonly consensus: MerchantConsensusService | undefined
 
-  public constructor(deps: Required<TransactionUseCasesDeps>) {
+  public constructor(deps: Required<TransactionUseCasesDeps> & {
+    readonly consensus?: MerchantConsensusService
+  }) {
     this.transactionRepo = deps.transactionRepo
     this.categoryRepo = deps.categoryRepo
     this.normalizer = deps.normalizer
     this.logger = deps.logger
+    this.consensus = deps.consensus
   }
 
   /**
@@ -126,6 +133,22 @@ export class CorrectCategoryUseCase {
       { userId, transactionId, categoryId, scope: effectiveScope, backfilled },
       'transaction category corrected',
     )
+
+    // Only a merchant-scoped correction is evidence about the merchant. A
+    // single-transaction correction says "this payment was different", which is
+    // the opposite of a claim about the counterparty in general.
+    //
+    // Failure here must not fail the correction: the user's own change is
+    // already committed and is what they asked for. Promotion is a background
+    // benefit to everyone else.
+    if (effectiveScope === 'merchant' && this.consensus !== undefined) {
+      try {
+        await this.consensus.evaluate(fingerprint)
+      } catch (err) {
+        this.logger.warn({ err, fingerprint }, 'consensus evaluation failed after correction')
+      }
+    }
+
     return { scope: effectiveScope, backfilled }
   }
 
