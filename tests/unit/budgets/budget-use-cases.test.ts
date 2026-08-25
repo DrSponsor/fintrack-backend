@@ -10,6 +10,7 @@ function createMockCategoryRepo(category: CategoryRecord | null = null): ICatego
   return {
     findAll: vi.fn().mockResolvedValue([]),
     findById: vi.fn().mockResolvedValue(category),
+    findByName: vi.fn().mockResolvedValue(null),
   }
 }
 

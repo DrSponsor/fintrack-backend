@@ -42,7 +42,8 @@ function createMockTransactionRepo(overrides: Partial<ITransactionRepository> = 
     create: vi.fn().mockResolvedValue(makeTransactionRecord()),
     findById: vi.fn().mockResolvedValue(makeTransactionRecord()),
     findByUser: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
-    correctCategory: vi.fn().mockResolvedValue(undefined),
+    // Resolves the count of backfilled rows, not undefined.
+    correctCategory: vi.fn().mockResolvedValue(0),
     ...overrides,
   }
 }
@@ -51,6 +52,7 @@ function createMockCategoryRepo(overrides: Partial<ICategoryRepository> = {}): I
   return {
     findAll: vi.fn().mockResolvedValue([]),
     findById: vi.fn().mockResolvedValue({ id: randomUUID(), name: 'food-groceries', icon: 'utensils' }),
+    findByName: vi.fn().mockResolvedValue(null),
     ...overrides,
   }
 }
@@ -149,7 +151,77 @@ describe('CorrectCategoryUseCase', () => {
       categoryId,
       'user-1',
       expect.any(String),
+      // No scope was requested and the row is not a transfer (findByName is
+      // mocked to null), so the correction reaches the whole merchant.
+      'merchant',
     )
+  })
+
+  it('keeps a correction to a single row when the transaction is a transfer', async () => {
+    // The counterparty is a person, and a person's category is not stable:
+    // money sent to the same individual can be food this week and a thrift
+    // contribution the next. Spreading one correction across all of them —
+    // forwards or backwards — would be confidently wrong.
+    const categoryId = randomUUID()
+    const transfersId = randomUUID()
+    const tx = makeTransactionRecord({ userId: 'user-1', categoryId: transfersId })
+
+    const transactionRepo = createMockTransactionRepo({
+      findById: vi.fn().mockResolvedValue(tx),
+    })
+    const categoryRepo = createMockCategoryRepo({
+      findById: vi.fn().mockResolvedValue({ id: categoryId, name: 'food-groceries', icon: 'utensils' }),
+      findByName: vi.fn().mockResolvedValue({ id: transfersId, name: 'transfers', icon: 'swap' }),
+    })
+
+    const useCase = new CorrectCategoryUseCase({
+      transactionRepo,
+      categoryRepo,
+      normalizer: new NormalizerService(),
+      logger: silentLogger,
+    })
+
+    const result = await useCase.execute('user-1', tx.id, { categoryId })
+
+    expect(result.scope).toBe('transaction')
+    expect(transactionRepo.correctCategory).toHaveBeenCalledWith(
+      tx.id,
+      categoryId,
+      'user-1',
+      expect.any(String),
+      'transaction',
+    )
+  })
+
+  it('honours an explicit scope over the inferred default', async () => {
+    const categoryId = randomUUID()
+    const transfersId = randomUUID()
+    const tx = makeTransactionRecord({ userId: 'user-1', categoryId: transfersId })
+
+    const transactionRepo = createMockTransactionRepo({
+      findById: vi.fn().mockResolvedValue(tx),
+      correctCategory: vi.fn().mockResolvedValue(11),
+    })
+    const categoryRepo = createMockCategoryRepo({
+      findById: vi.fn().mockResolvedValue({ id: categoryId, name: 'food-groceries', icon: 'utensils' }),
+      findByName: vi.fn().mockResolvedValue({ id: transfersId, name: 'transfers', icon: 'swap' }),
+    })
+
+    const useCase = new CorrectCategoryUseCase({
+      transactionRepo,
+      categoryRepo,
+      normalizer: new NormalizerService(),
+      logger: silentLogger,
+    })
+
+    // The user overrules the cautious default: they know this particular
+    // counterparty always means the same thing to them.
+    const result = await useCase.execute('user-1', tx.id, { categoryId, scope: 'merchant' })
+
+    expect(result.scope).toBe('merchant')
+    // Reported back so the response can say what happened rather than
+    // rewriting eleven rows of history silently.
+    expect(result.backfilled).toBe(11)
   })
 
   it('throws NOT_FOUND if category does not exist', async () => {

@@ -6,6 +6,7 @@ function createMockCategoryRepo(categories: readonly CategoryRecord[] = []): ICa
   return {
     findAll: vi.fn().mockResolvedValue(categories),
     findById: vi.fn().mockResolvedValue(null),
+    findByName: vi.fn().mockResolvedValue(null),
   }
 }
 

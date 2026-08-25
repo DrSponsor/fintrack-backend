@@ -47,8 +47,24 @@ export interface ITransactionRepository {
     limit?: number,
     filters?: ListTransactionsFilter,
   ): Promise<{ readonly data: readonly TransactionRecord[]; readonly hasMore: boolean }>
-  correctCategory(id: string, categoryId: string, userId: string, fingerprint: string): Promise<void>
+  /**
+   * Applies a category correction.
+   *
+   * Returns how many EARLIER transactions were backfilled, so the caller can
+   * tell the user what actually happened rather than claiming a silent rewrite
+   * of their history.
+   */
+  correctCategory(
+    id: string,
+    categoryId: string,
+    userId: string,
+    fingerprint: string,
+    scope: CorrectionScope,
+  ): Promise<number>
 }
+
+/** See correctCategoryBodySchema for why a correction has a reach at all. */
+export type CorrectionScope = 'transaction' | 'merchant'
 
 const SELECT_FIELDS = {
   id: true,
@@ -270,7 +286,8 @@ export class PrismaTransactionRepository implements ITransactionRepository {
     categoryId: string,
     userId: string,
     fingerprint: string,
-  ): Promise<void> {
+    scope: CorrectionScope,
+  ): Promise<number> {
     const tx = await this.prisma.transaction.findFirst({
       where: { id },
       select: { transactionDate: true },
@@ -305,27 +322,65 @@ export class PrismaTransactionRepository implements ITransactionRepository {
           createdAt: eventTimestamp,
         },
       }),
-      this.prisma.userMerchantPreference.upsert({
-        where: {
-          userId_merchantFingerprint: {
-            userId,
-            merchantFingerprint: fingerprint,
-          },
-        },
-        create: {
-          userId,
-          merchantFingerprint: fingerprint,
-          categoryId,
-          correctionCount: 1,
-          lastCorrectedAt: new Date(),
-        },
-        update: {
-          categoryId,
-          correctionCount: { increment: 1 },
-          lastCorrectedAt: new Date(),
-        },
-      }),
+      // Remembering the correction is CONDITIONAL. It used to be
+      // unconditional, which quietly turned "this payment was for food" into
+      // "everything I ever send this person is food" — right for a shop, wrong
+      // for a human being, whose transfers change purpose week to week.
+      ...(scope === 'merchant'
+        ? [
+            this.prisma.userMerchantPreference.upsert({
+              where: {
+                userId_merchantFingerprint: {
+                  userId,
+                  merchantFingerprint: fingerprint,
+                },
+              },
+              create: {
+                userId,
+                merchantFingerprint: fingerprint,
+                categoryId,
+                correctionCount: 1,
+                lastCorrectedAt: new Date(),
+              },
+              update: {
+                categoryId,
+                correctionCount: { increment: 1 },
+                lastCorrectedAt: new Date(),
+              },
+            }),
+          ]
+        : []),
     ])
+
+    if (scope !== 'merchant') return 0
+
+    // ── Backfill ───────────────────────────────────────────────────────────
+    // A correction that fixes only the row in front of you leaves every earlier
+    // one wrong, so the user walks back through months of history repeating
+    // themselves.
+    //
+    // Matched on the fingerprint rather than the stored name, because the
+    // fingerprint is what every other tier keys on — matching the name would
+    // miss the spelling variants a fingerprint exists to collapse. The
+    // transactions table has no fingerprint column, so the expression below
+    // reproduces NormalizerService.getMerchantFingerprint exactly:
+    // lowercase, then strip everything that is not a letter or digit. If that
+    // derivation ever changes, this must change with it.
+    //
+    // Scoped to this user's own accounts through the join, and confined to the
+    // categories this correction is actually about — see the WHERE clause note.
+    const backfilled = await this.prisma.$executeRaw`
+      UPDATE transactions t
+      SET category_id = ${categoryId}::uuid
+      FROM accounts a
+      WHERE t.account_id = a.id
+        AND a.user_id = ${userId}::uuid
+        AND t.id <> ${id}::uuid
+        AND t.category_id <> ${categoryId}::uuid
+        AND lower(regexp_replace(t.merchant_name, '[^a-zA-Z0-9]', '', 'g')) = ${fingerprint}
+    `
+
+    return backfilled
   }
 
   private async findLastEventHash(transactionId: string): Promise<string> {

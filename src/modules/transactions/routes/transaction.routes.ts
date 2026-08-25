@@ -84,10 +84,17 @@ export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
     async (request, reply) => {
       const userId = requireUser(request).sub
       const { id } = request.params as { id: string }
-      await correctCategoryUseCase.execute(userId, id, request.body)
+      const { scope, backfilled } = await correctCategoryUseCase.execute(userId, id, request.body)
 
+      // The reach and the count are returned, not just "success". A correction
+      // that also rewrote eleven earlier rows is something the user should be
+      // told about — silently editing history is how a user stops trusting
+      // their own ledger.
       return reply.code(200).send(
-        successEnvelope({ message: 'Transaction category corrected successfully' }, request.requestId),
+        successEnvelope(
+          { message: 'Transaction category corrected successfully', scope, backfilled },
+          request.requestId,
+        ),
       )
     },
   )

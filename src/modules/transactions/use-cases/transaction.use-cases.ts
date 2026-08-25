@@ -76,7 +76,17 @@ export class CorrectCategoryUseCase {
     this.logger = deps.logger
   }
 
-  public async execute(userId: string, transactionId: string, rawBody: unknown): Promise<void> {
+  /**
+   * Returns the reach that was applied and how many earlier transactions were
+   * changed, so the response can say what happened. "Also updated 11 earlier
+   * transactions" is information the user needs; silently rewriting history is
+   * not something to do without telling them.
+   */
+  public async execute(
+    userId: string,
+    transactionId: string,
+    rawBody: unknown,
+  ): Promise<{ readonly scope: 'transaction' | 'merchant'; readonly backfilled: number }> {
     const parsed = correctCategoryBodySchema.safeParse(rawBody)
     if (!parsed.success) {
       const firstIssue = parsed.error.issues[0]
@@ -86,7 +96,7 @@ export class CorrectCategoryUseCase {
       )
     }
 
-    const { categoryId } = parsed.data
+    const { categoryId, scope } = parsed.data
 
     // Check category exists
     const category = await this.categoryRepo.findById(categoryId)
@@ -103,7 +113,41 @@ export class CorrectCategoryUseCase {
     const normalizedMerchant = this.normalizer.normalizeMerchantName(transaction.merchantName)
     const fingerprint = this.normalizer.getMerchantFingerprint(normalizedMerchant)
 
-    await this.transactionRepo.correctCategory(transactionId, categoryId, userId, fingerprint)
-    this.logger.info({ userId, transactionId, categoryId }, 'transaction category corrected')
+    const effectiveScope = scope ?? (await this.defaultScope(transaction.categoryId))
+
+    const backfilled = await this.transactionRepo.correctCategory(
+      transactionId,
+      categoryId,
+      userId,
+      fingerprint,
+      effectiveScope,
+    )
+    this.logger.info(
+      { userId, transactionId, categoryId, scope: effectiveScope, backfilled },
+      'transaction category corrected',
+    )
+    return { scope: effectiveScope, backfilled }
+  }
+
+  /**
+   * Chooses a reach when the client did not state one.
+   *
+   * The question is whether the counterparty determines the category. For a
+   * business it generally does. For an individual it does not — the same person
+   * can receive money for food one week and a thrift contribution the next — so
+   * a correction there describes THIS payment, not the relationship.
+   *
+   * A row sitting in `transfers` is the signal that the counterparty is a
+   * person, since that is precisely what the categoriser uses the category for.
+   *
+   * When in doubt this picks the narrow option, because the two mistakes are
+   * not equally costly: a correction that failed to spread is visible the next
+   * time the user looks at that merchant, while an unwanted rewrite of months
+   * of history is nearly invisible and destroys data the user never revisited.
+   */
+  private async defaultScope(currentCategoryId: string): Promise<'transaction' | 'merchant'> {
+    const transfers = await this.categoryRepo.findByName('transfers')
+    if (transfers !== null && transfers.id === currentCategoryId) return 'transaction'
+    return 'merchant'
   }
 }

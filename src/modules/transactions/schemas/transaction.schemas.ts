@@ -18,8 +18,31 @@ export const listTransactionsQuerySchema = z.object({
 
 export type ListTransactionsQuery = z.infer<typeof listTransactionsQuerySchema>
 
+/**
+ * How far a correction reaches.
+ *
+ * A counterparty does not always determine a category. For a business it
+ * usually does — Spotify is subscriptions every time — so correcting one
+ * Spotify charge should fix the earlier ones and every future one.
+ *
+ * For a PERSON it does not. Money sent to the same individual can be food
+ * today and a thrift contribution tomorrow: the counterparty is constant while
+ * the purpose changes. Applying one correction to every transfer with that
+ * person would be confidently wrong, and wrong retroactively.
+ *
+ *   'transaction' — this row only. Nothing remembered, nothing backfilled.
+ *   'merchant'    — remember it for this user, and apply it to their earlier
+ *                   and future transactions with the same counterparty.
+ *
+ * Omitted, the server chooses: 'transaction' when the row currently sits in
+ * transfers (the counterparty is an individual), 'merchant' otherwise. The
+ * cautious option is the default in the ambiguous case, because an unwanted
+ * rewrite of history is far harder to notice than a correction that failed to
+ * spread.
+ */
 export const correctCategoryBodySchema = z.object({
   categoryId: z.string().uuid('Invalid category ID'),
+  scope: z.enum(['transaction', 'merchant']).optional(),
 }).strict()
 
 export type CorrectCategoryBody = z.infer<typeof correctCategoryBodySchema>
@@ -116,6 +139,7 @@ export const correctCategoryJsonSchema = {
     required: ['categoryId'],
     properties: {
       categoryId: { type: 'string', format: 'uuid' },
+      scope: { type: 'string', enum: ['transaction', 'merchant'] },
     },
   },
   response: {
@@ -128,9 +152,16 @@ export const correctCategoryJsonSchema = {
         data: {
           type: 'object',
           additionalProperties: false,
-          required: ['message'],
+          required: ['message', 'scope', 'backfilled'],
           properties: {
             message: { type: 'string' },
+            /** The reach actually applied — which may be the server's default
+             *  rather than what the client asked for. */
+            scope: { type: 'string', enum: ['transaction', 'merchant'] },
+            /** How many EARLIER transactions were changed. Zero for a
+             *  single-row correction. Fastify strips undeclared fields from
+             *  responses, so omitting these here would silently drop them. */
+            backfilled: { type: 'integer' },
           },
         },
         requestId: { type: 'string' },

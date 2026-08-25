@@ -96,6 +96,7 @@ function createMockCategoryRepo(): ICategoryRepository {
       name: 'Food',
       icon: 'food-icon',
     }),
+    findByName: vi.fn().mockResolvedValue(null),
   }
 }
 

@@ -9,6 +9,9 @@ export type CategoryRecord = {
 export interface ICategoryRepository {
   findAll(): Promise<readonly CategoryRecord[]>
   findById(id: string): Promise<CategoryRecord | null>
+  /** Seeded categories are addressed by their stable name — 'transfers',
+   *  'uncategorised' — where an id would be an unreadable constant. */
+  findByName(name: string): Promise<CategoryRecord | null>
 }
 
 export class PrismaCategoryRepository implements ICategoryRepository {
@@ -28,6 +31,13 @@ export class PrismaCategoryRepository implements ICategoryRepository {
   public async findById(id: string): Promise<CategoryRecord | null> {
     return this.prisma.category.findUnique({
       where: { id },
+      select: { id: true, name: true, icon: true },
+    })
+  }
+
+  public async findByName(name: string): Promise<CategoryRecord | null> {
+    return this.prisma.category.findUnique({
+      where: { name },
       select: { id: true, name: true, icon: true },
     })
   }
