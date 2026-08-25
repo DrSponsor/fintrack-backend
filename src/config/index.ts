@@ -33,6 +33,13 @@ const envSchema = z.object({
   JWT_PUBLIC_KEY_PEM: z.string().optional().or(z.literal('')),
   JWT_PRIVATE_KEY_PEM: z.string().optional().or(z.literal('')),
   DEEPSEEK_API_KEY: z.string().optional().or(z.literal('')),
+  /** Model id. Defaults in the provider; set this to migrate without a deploy.
+   *  The legacy 'deepseek-chat' alias was retired 24 Jul 2026. */
+  DEEPSEEK_MODEL: z.string().optional().or(z.literal('')),
+  /** 'deepseek' | 'gemini'. Omit to auto-select from whichever key is set. */
+  AI_PROVIDER: z.string().optional().or(z.literal('')),
+  GEMINI_API_KEY: z.string().optional().or(z.literal('')),
+  GEMINI_MODEL: z.string().optional().or(z.literal('')),
   GOOGLE_CLIENT_ID: z.string().optional().or(z.literal('')),
   GOOGLE_CLIENT_SECRET: z.string().optional().or(z.literal('')),
   GOOGLE_REDIRECT_URI: z.string().optional().or(z.literal('')),
@@ -157,6 +164,10 @@ export type AppConfig = {
   readonly jwtPublicKeyPem?: string
   readonly jwtPrivateKeyPem?: string
   readonly deepseekApiKey?: string
+  readonly deepseekModel?: string
+  readonly aiProvider?: string
+  readonly geminiApiKey?: string
+  readonly geminiModel?: string
   readonly googleClientId?: string
   readonly googleClientSecret?: string
   readonly googleRedirectUri?: string
@@ -191,6 +202,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(parsed.JWT_PUBLIC_KEY_PEM ? { jwtPublicKeyPem: parsed.JWT_PUBLIC_KEY_PEM } : {}),
     ...(parsed.JWT_PRIVATE_KEY_PEM ? { jwtPrivateKeyPem: parsed.JWT_PRIVATE_KEY_PEM } : {}),
     ...(parsed.DEEPSEEK_API_KEY ? { deepseekApiKey: parsed.DEEPSEEK_API_KEY } : {}),
+    ...(parsed.DEEPSEEK_MODEL ? { deepseekModel: parsed.DEEPSEEK_MODEL } : {}),
+    ...(parsed.AI_PROVIDER ? { aiProvider: parsed.AI_PROVIDER } : {}),
+    ...(parsed.GEMINI_API_KEY ? { geminiApiKey: parsed.GEMINI_API_KEY } : {}),
+    ...(parsed.GEMINI_MODEL ? { geminiModel: parsed.GEMINI_MODEL } : {}),
     ...(parsed.GOOGLE_CLIENT_ID ? { googleClientId: parsed.GOOGLE_CLIENT_ID } : {}),
     ...(parsed.GOOGLE_CLIENT_SECRET ? { googleClientSecret: parsed.GOOGLE_CLIENT_SECRET } : {}),
     ...(parsed.GOOGLE_REDIRECT_URI ? { googleRedirectUri: parsed.GOOGLE_REDIRECT_URI } : {}),

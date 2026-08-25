@@ -1,6 +1,6 @@
 import fp from 'fastify-plugin'
 import type { FastifyInstance } from 'fastify'
-import { DeepSeekProvider } from '../ai/deepseek.provider'
+import { createAIProvider } from '../ai/create-provider'
 
 export const aiPlugin = fp(async (fastify: FastifyInstance) => {
   // 1. Fetch categories to build name -> id map for AI categorization
@@ -12,11 +12,8 @@ export const aiPlugin = fp(async (fastify: FastifyInstance) => {
     categories.map((c) => [c.name.toLowerCase().trim(), c.id]),
   )
 
-  // 2. Instantiate DeepSeekProvider as a singleton decorated onto fastify.ai
-  const aiProvider = new DeepSeekProvider({
-    apiKey: fastify.appConfig.deepseekApiKey ?? '',
-    categoriesMap,
-  })
+  // 2. Instantiate the configured AI provider as a singleton on fastify.ai
+  const aiProvider = createAIProvider(fastify.appConfig, categoriesMap)
 
   fastify.decorate('ai', aiProvider)
 }, {

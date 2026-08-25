@@ -1,20 +1,48 @@
 import CircuitBreaker from 'opossum'
 import type { IAIProvider, CategorizationResult, ReportSummary } from './ai-provider.interface'
 import { circuitBreakerStateGauge } from '../observability/metrics'
+import {
+  categorizePrompt,
+  insightPrompt,
+  insightUserPrompt,
+  parserPatternPrompt,
+} from './prompts'
+
+/**
+ * Default model.
+ *
+ * This was `deepseek-chat`, which STOPPED RESOLVING on 24 July 2026 when
+ * DeepSeek retired the legacy aliases in favour of the v4 names. Calls with the
+ * old name return an HTTP error, which surfaces here as "AI provider failed to
+ * generate patterns" — indistinguishable from a missing key or an open circuit
+ * breaker, and therefore very easy to misdiagnose.
+ *
+ * v4-flash rather than v4-pro: the work is field extraction and classification
+ * against a short document, which is exactly what flash is for, at roughly a
+ * third of the price.
+ */
+const DEFAULT_MODEL = 'deepseek-v4-flash'
 
 export type DeepSeekProviderDeps = {
   readonly apiKey: string
   readonly categoriesMap: ReadonlyMap<string, string> // name -> ID map
+  /** Overridable so a future rename is an env change, not a deploy. */
+  readonly model?: string | undefined
 }
 
 export class DeepSeekProvider implements IAIProvider {
   public readonly providerName = 'deepseek'
   private readonly apiKey: string
+  private readonly model: string
   private readonly categoriesMap: ReadonlyMap<string, string>
   private readonly breaker: CircuitBreaker<[string, string, string], string>
+  /** Reason the last pattern generation failed. Diagnostic only — see
+   *  getLastError. */
+  private lastError: string | undefined
 
   public constructor(deps: DeepSeekProviderDeps) {
     this.apiKey = deps.apiKey
+    this.model = deps.model && deps.model.length > 0 ? deps.model : DEFAULT_MODEL
     this.categoriesMap = deps.categoriesMap
 
     this.breaker = new CircuitBreaker(
@@ -37,7 +65,13 @@ export class DeepSeekProvider implements IAIProvider {
     // Setup action-specific fallback values when the circuit is open or requests fail.
     // opossum calls this with the original .fire() args first, error last —
     // see the comment on CircuitBreaker.fallback in src/types/opossum.d.ts.
-    this.breaker.fallback((action: string, _systemPrompt: string, _userPrompt: string, _err: Error) => {
+    // The error is recorded here because a fallback RESOLVES rather than
+    // rejects, so the catch around fire() never sees it and the reason would be
+    // lost — see the matching note in gemini.provider.ts.
+    this.breaker.fallback((action: string, _systemPrompt: string, _userPrompt: string, err?: Error) => {
+      if (err !== undefined) {
+        this.lastError = err.message
+      }
       if (action === 'categorize') {
         return JSON.stringify({ category: 'uncategorised', confidence: 0 })
       }
@@ -64,7 +98,7 @@ export class DeepSeekProvider implements IAIProvider {
         'Authorization': `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -98,12 +132,7 @@ export class DeepSeekProvider implements IAIProvider {
   }
 
   public async categorize(merchantName: string, amountKobo: bigint): Promise<CategorizationResult> {
-    const categoriesList = Array.from(this.categoriesMap.keys()).join(', ')
-    const systemPrompt = `You are a financial transaction categorizer. Categorize the given merchant name into one of these categories: [${categoriesList}].
-Return a JSON object containing:
-- "category": the exact name of the matched category from the list.
-- "confidence": a number from 0 to 1 representing your confidence.
-`
+    const systemPrompt = categorizePrompt(Array.from(this.categoriesMap.keys()))
     const userPrompt = `Merchant: "${merchantName}", Amount in Kobo: ${amountKobo.toString()}`
 
     try {
@@ -125,42 +154,41 @@ Return a JSON object containing:
   }
 
   public async generateInsightNarrative(reportSummary: ReportSummary): Promise<string> {
-    const systemPrompt = `You are a personal finance tracking assistant.
-Describe spending patterns factually.
-
-RULES:
-- Describe what happened. Never prescribe what to do with money.
-- Never name specific investment products, savings accounts, or financial institutions.
-- Never predict future market conditions.
-- Frame everything as observation: "You spent ₦X on Y" not "You should...".
-- End every response with: "This is a spending summary, not financial advice."
-`
-    const userPrompt = `Report Summary:
-Period: ${reportSummary.periodStart} to ${reportSummary.periodEnd}
-Total Spent (Kobo): ${reportSummary.totalSpentKobo}
-Total Income (Kobo): ${reportSummary.totalIncomeKobo}
-`
     try {
-      return await this.breaker.fire('insight', systemPrompt, userPrompt)
+      return await this.breaker.fire('insight', insightPrompt, insightUserPrompt(reportSummary))
     } catch {
       return 'Could not generate AI insights at this time. This is a spending summary, not financial advice.'
     }
   }
 
   public async generateParserPattern(emailSample: string): Promise<Record<string, string>> {
-    const systemPrompt = `You are an expert parser generator. Inspect the given bank transaction email and extract a structured regex or field mapping to extract:
-- "amount_kobo"
-- "type" (DEBIT or CREDIT)
-- "merchant_name"
-- "date"
-- "balance_kobo"
-Return a JSON object with keys and corresponding string regex patterns or extraction rules.
-`
+    // Cleared BEFORE the call, never after. A circuit-breaker fallback
+    // RESOLVES rather than rejects, so clearing on the success path wiped the
+    // reason the fallback had just recorded — which is why a 404 for a retired
+    // model surfaced as "no reason recorded".
+    this.lastError = undefined
     try {
-      const responseText = await this.breaker.fire('pattern', systemPrompt, emailSample)
+      const responseText = await this.breaker.fire('pattern', parserPatternPrompt, emailSample)
       return JSON.parse(responseText) as Record<string, string>
-    } catch {
+    } catch (err) {
+      // Rethrow-as-empty is the contract callers expect, but swallowing the
+      // reason made four very different failures — no credit (402), a retired
+      // model name (400), a bad key (401), and an open circuit breaker — look
+      // identical in the logs as "AI provider failed to generate patterns".
+      // Diagnosing `deepseek-chat` cost real time to exactly this. The reason
+      // is now recorded even though the shape of the return value is unchanged.
+      this.lastError = err instanceof Error ? err.message : String(err)
       return {}
     }
+  }
+
+  /**
+   * Why the most recent generateParserPattern call returned nothing.
+   *
+   * Read by callers for logging only. Deliberately not part of IAIProvider:
+   * it is a diagnostic, and no control flow should branch on it.
+   */
+  public getLastError(): string | undefined {
+    return this.lastError
   }
 }

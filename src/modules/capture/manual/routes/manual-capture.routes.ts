@@ -6,7 +6,7 @@ import { NormalizerService } from '../../../transactions/services/normalizer.ser
 import { CategorizerService } from '../../../transactions/services/categorizer.service'
 import { DeduplicatorService } from '../../../transactions/services/deduplicator.service'
 import { PrismaCategorizationRepository } from '../../../transactions/repositories/categorization.repo'
-import { DeepSeekProvider } from '../../../../core/ai/deepseek.provider'
+import { createAIProvider } from '../../../../core/ai/create-provider'
 import { authenticate, requireUser } from '../../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../../core/http/envelope'
 import { manualCaptureJsonSchema } from '../schemas/manual-capture.schemas'
@@ -20,10 +20,7 @@ export function registerManualCaptureRoutes(
   const mappingRepo = new PrismaCategorizationRepository(fastify.db.primary)
   const normalizer = new NormalizerService()
 
-  const aiProvider = new DeepSeekProvider({
-    apiKey: fastify.appConfig.deepseekApiKey ?? '',
-    categoriesMap,
-  })
+  const aiProvider = createAIProvider(fastify.appConfig, categoriesMap)
 
   const categorizer = new CategorizerService({
     mappingRepo,

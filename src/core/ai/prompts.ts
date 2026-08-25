@@ -1,0 +1,85 @@
+/**
+ * Shared prompts for every IAIProvider implementation.
+ *
+ * These live outside the providers because one of them is COUPLED to logic
+ * elsewhere: `parserPatternPrompt` demands an "amountValue" field, and
+ * AIUniversalParser refuses any pattern it cannot round-trip against that
+ * value. Drop the field from the prompt and every generated pattern is
+ * silently rejected — the AI path stops working with no error anywhere.
+ *
+ * With one prompt per provider that hazard doubles: a fix applied to the
+ * DeepSeek copy leaves the Gemini copy broken, and the failure is invisible
+ * until someone switches providers. One definition, used by both.
+ */
+
+/** Categorisation. `categoryNames` is the caller's allowed set. */
+export function categorizePrompt(categoryNames: readonly string[]): string {
+  return `You are a financial transaction categorizer. Categorize the given merchant name into one of these categories: [${categoryNames.join(', ')}].
+Return a JSON object containing:
+- "category": the exact name of the matched category from the list.
+- "confidence": a number from 0 to 1 representing your confidence.
+`
+}
+
+/**
+ * Spending narrative.
+ *
+ * The constraints are regulatory, not stylistic: describing spending is
+ * reporting, but recommending what to do with money is financial advice, which
+ * this product is not licensed to give.
+ */
+export const insightPrompt = `You are a personal finance tracking assistant.
+Describe spending patterns factually.
+
+RULES:
+- Describe what happened. Never prescribe what to do with money.
+- Never name specific investment products, savings accounts, or financial institutions.
+- Never predict future market conditions.
+- Frame everything as observation: "You spent ₦X on Y" not "You should...".
+- End every response with: "This is a spending summary, not financial advice."
+`
+
+/**
+ * Parser-pattern generation.
+ *
+ * "amountValue" is load-bearing, not decorative. AIUniversalParser re-runs the
+ * generated regex and requires it to reproduce this exact string before the
+ * pattern is trusted and cached for every user of that bank. It is what catches
+ * a regex that confidently captures the closing balance, or the account number,
+ * instead of the transaction amount.
+ *
+ * Change this prompt and pattern-safety.ts together, or not at all.
+ */
+export const parserPatternPrompt = `You generate regular expressions that extract fields from bank transaction emails.
+
+Return ONLY a JSON object with these keys:
+  "amountRegex"    regex capturing the TRANSACTION amount in group 1
+  "amountValue"    the exact text group 1 captures from THIS email
+  "typeRegex"      regex capturing a word indicating direction in group 1
+  "merchantRegex"  regex capturing the counterparty or description in group 1
+  "dateRegex"      regex capturing the transaction date in group 1
+  "balanceRegex"   regex capturing the resulting balance in group 1
+
+Rules:
+- Every regex MUST contain exactly one capturing group, and the value you want must be in group 1.
+- Match on nearby literal text (labels, headings) so the pattern is specific.
+- The transaction amount and the closing balance are DIFFERENT numbers. Never write a pattern that could match either.
+- Never capture an account number, a reference number or a phone number as the amount.
+- Keep each pattern under 200 characters.
+- Do NOT use nested quantifiers such as (a+)+ or (.*)* — they are rejected.
+- "amountValue" must be copied exactly from the email text, with no reformatting.
+`
+
+/** Insight user message. Kept here so both providers frame the data identically. */
+export function insightUserPrompt(summary: {
+  readonly periodStart: string
+  readonly periodEnd: string
+  readonly totalSpentKobo: string
+  readonly totalIncomeKobo: string
+}): string {
+  return `Report Summary:
+Period: ${summary.periodStart} to ${summary.periodEnd}
+Total Spent (Kobo): ${summary.totalSpentKobo}
+Total Income (Kobo): ${summary.totalIncomeKobo}
+`
+}
