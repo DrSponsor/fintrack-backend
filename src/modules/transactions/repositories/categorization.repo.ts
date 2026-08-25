@@ -16,6 +16,14 @@ export class PrismaCategorizationRepository implements ICategorizationRepository
     return category?.id ?? null
   }
 
+  public async findCategoryIdByName(name: string): Promise<string | null> {
+    const category = await this.prisma.category.findUnique({
+      where: { name },
+      select: { id: true },
+    })
+    return category?.id ?? null
+  }
+
   public async findMerchantMapping(fingerprint: string): Promise<string | null> {
     const mapping = await this.prisma.merchantCategoryMap.findUnique({
       where: { merchantFingerprint: fingerprint },
