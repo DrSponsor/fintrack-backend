@@ -167,6 +167,142 @@ export function isPlausibleAmountKobo(kobo: bigint): boolean {
 }
 
 /**
+ * Whether a captured word actually states a direction of money.
+ *
+ * A `typeRegex` can round-trip perfectly and still be meaningless — capturing
+ * "Transaction" reproduces the model's declared value and tells us nothing. The
+ * captured token must be a word this system recognises as a direction, or the
+ * pattern is not usable no matter how well it verifies.
+ *
+ * Word-boundary anchored, never substring: `includes('CR')` is the bug that
+ * made the hand-written Access parser read every credit as a debit, because
+ * the bank's own footer contains the word "Address".
+ */
+const CREDIT_TOKEN = /\b(CREDIT|CREDITED|CR|RECEIVED|INWARD|DEPOSIT|LODGEMENT)\b/
+const DEBIT_TOKEN = /\b(DEBIT|DEBITED|DR|WITHDRAWAL|PAYMENT|PURCHASE|TRANSFER)\b/
+
+export function readDirection(value: string): 'DEBIT' | 'CREDIT' | null {
+  const upper = value.toUpperCase()
+  const isCredit = CREDIT_TOKEN.test(upper)
+  const isDebit = DEBIT_TOKEN.test(upper)
+  // Both or neither is ambiguous, and guessing the direction of money is
+  // exactly the thing not to do.
+  if (isCredit === isDebit) return null
+  return isCredit ? 'CREDIT' : 'DEBIT'
+}
+
+/**
+ * Whether a parsed date is a believable transaction date.
+ *
+ * `new Date('17')` yields a valid Date object in the year 2001, so "valid" is
+ * not the same as "sane". This is what stops a truncated capture — the exact
+ * failure the old Access parser had, where a character class missing '/' turned
+ * 17/08/2026 into 17 — from being cached as a bank's date rule.
+ *
+ * Ten years back covers any statement backfill worth having; one day forward
+ * allows for timezone skew without admitting dates from next year.
+ */
+export function isPlausibleTransactionDate(date: Date, now: Date = new Date()): boolean {
+  if (Number.isNaN(date.getTime())) return false
+  const tenYearsAgo = new Date(now)
+  tenYearsAgo.setFullYear(tenYearsAgo.getFullYear() - 10)
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+  return date >= tenYearsAgo && date <= tomorrow
+}
+
+/** Fields a generated pattern set can describe. */
+export type PatternField = 'amount' | 'type' | 'merchant' | 'date' | 'balance'
+
+export type FieldVerdict = {
+  readonly field: PatternField
+  readonly verified: boolean
+  /** Present when `verified` is false. */
+  readonly reason?: string
+}
+
+/** Where the model may put each field, including the snake_case variants it
+ *  sometimes emits despite the prompt. */
+const FIELD_KEYS: Readonly<Record<PatternField, readonly [string, string, string, string]>> = {
+  amount: ['amountRegex', 'amount_kobo', 'amountValue', 'amount_value'],
+  type: ['typeRegex', 'type', 'typeValue', 'type_value'],
+  merchant: ['merchantRegex', 'merchant_name', 'merchantValue', 'merchant_value'],
+  date: ['dateRegex', 'date', 'dateValue', 'date_value'],
+  balance: ['balanceRegex', 'balance_kobo', 'balanceValue', 'balance_value'],
+}
+
+/**
+ * Round-trip verifies EVERY field, not only the amount.
+ *
+ * Verifying the amount alone was a defensible starting point — a wrong amount
+ * is unrecoverable — but it left three fields structurally checked and never
+ * proven. A date pattern that captures the wrong token, or a type pattern that
+ * captures a word carrying no direction, would have been cached as the rule for
+ * an entire bank and quietly mis-stated every transaction from it.
+ *
+ * Verification happens at GENERATION time only, against the one email the model
+ * saw. It cannot run on reuse: the declared values belong to that sample, and a
+ * later email legitimately has a different amount and date. So this is the only
+ * moment the claim can be tested, which is why it tests everything it can.
+ *
+ * Each field carries its own extra condition beyond the round trip, because a
+ * string matching itself proves the regex is stable, not that it is meaningful:
+ * the amount must be a plausible magnitude, the type must name a direction, and
+ * the date must parse to a believable date.
+ */
+export function verifyPatternFields(
+  patterns: Readonly<Record<string, string>>,
+  text: string,
+  parseAmount: (raw: string) => bigint,
+): readonly FieldVerdict[] {
+  const verdicts: FieldVerdict[] = []
+
+  for (const field of Object.keys(FIELD_KEYS) as PatternField[]) {
+    const [regexKey, regexAlt, valueKey, valueAlt] = FIELD_KEYS[field]
+    const source = patterns[regexKey] ?? patterns[regexAlt]
+    const declared = patterns[valueKey] ?? patterns[valueAlt]
+
+    if (source === undefined || source.length === 0) {
+      verdicts.push({ field, verified: false, reason: 'no pattern supplied' })
+      continue
+    }
+
+    const check = checkPattern(source)
+    if (!check.ok) {
+      verdicts.push({ field, verified: false, reason: check.reason })
+      continue
+    }
+
+    if (!verifyExtraction(check.regex, text, declared)) {
+      verdicts.push({ field, verified: false, reason: 'did not reproduce the declared value' })
+      continue
+    }
+
+    const captured = runPattern(check.regex, text) ?? ''
+
+    if (field === 'amount' || field === 'balance') {
+      if (!isPlausibleAmountKobo(parseAmount(captured))) {
+        verdicts.push({ field, verified: false, reason: `implausible magnitude: ${captured}` })
+        continue
+      }
+    }
+
+    if (field === 'type' && readDirection(captured) === null) {
+      verdicts.push({ field, verified: false, reason: `states no direction: ${captured}` })
+      continue
+    }
+
+    if (field === 'date' && !isPlausibleTransactionDate(new Date(captured))) {
+      verdicts.push({ field, verified: false, reason: `implausible date: ${captured}` })
+      continue
+    }
+
+    verdicts.push({ field, verified: true })
+  }
+
+  return verdicts
+}
+
+/**
  * Removes personal detail before an email is sent to a third-party model.
  *
  * The model needs the SHAPE of the document to write a regex — labels, layout,

@@ -5,6 +5,7 @@ import {
   verifyExtraction,
   isPlausibleAmountKobo,
   redactForModel,
+  verifyPatternFields,
 } from '../../../src/modules/capture/email/parsers/pattern-safety'
 import { parseAmountKobo } from '../../../src/modules/capture/email/parsers/utils'
 
@@ -155,5 +156,72 @@ describe('redactForModel', () => {
     const out = redactForModel(REAL_EMAIL)
     expect(out).toContain('Available Balance')
     expect(out).toContain('Transaction Date')
+  })
+})
+
+describe('verifyPatternFields — every field, not just the amount', () => {
+  // The real Access Bank debit alert, flattened as cleanText leaves it.
+  const EMAIL =
+    'Dear JOHN ADEBAYO DOE, Your account has been Debited NGN 4,989.25 ' +
+    'Transaction Summary A/C Number 012******345 Account Name JOHN ADEBAYO DOE ' +
+    'Description MOBILE TRF TO PAY/ /JOHN ADEBAYO Reference Number 312ABCD2600000AA ' +
+    'Transaction Branch IDIMU BRANCH Transaction Date 17-Aug-2026 Value Date 17-Aug-2026 ' +
+    'Available Balance 200,000.00'
+
+  // String.raw throughout. These are regex SOURCES stored as strings, so a
+  // plain literal silently eats the backslashes — '\d' becomes 'd', and the
+  // pattern matches a literal letter d instead of a digit. The first version of
+  // this fixture had exactly that defect and made a working verifier look
+  // broken.
+  const GOOD: Record<string, string> = {
+    amountRegex: String.raw`Debited NGN ([\d,]+\.\d{2})`,
+    amountValue: '4,989.25',
+    typeRegex: String.raw`(Debited)`,
+    typeValue: 'Debited',
+    merchantRegex: String.raw`Description ([A-Z0-9/ ]+?) Reference`,
+    merchantValue: 'MOBILE TRF TO PAY/ /JOHN ADEBAYO',
+    dateRegex: String.raw`Transaction Date ([0-9]{2}-[A-Za-z]{3}-[0-9]{4})`,
+    dateValue: '17-Aug-2026',
+    balanceRegex: String.raw`Available Balance ([\d,]+\.\d{2})`,
+    balanceValue: '200,000.00',
+  }
+
+  const verdict = (patterns: Record<string, string>, field: string) =>
+    verifyPatternFields(patterns, EMAIL, parseAmountKobo).find((v) => v.field === field)
+
+  it('verifies all five fields of a correct pattern set', () => {
+    const verdicts = verifyPatternFields(GOOD, EMAIL, parseAmountKobo)
+    expect(verdicts.every((v) => v.verified)).toBe(true)
+  })
+
+  it('rejects a date pattern that captures only part of the date', () => {
+    // The exact defect the hand-written Access parser had: a character class
+    // missing '/' turned 17/08/2026 into "17", which new Date() happily reads
+    // as the year 2001.
+    const truncated = { ...GOOD, dateRegex: 'Transaction Date ([0-9]{2})', dateValue: '17' }
+    expect(verdict(truncated, 'date')?.verified).toBe(false)
+  })
+
+  it('rejects a type pattern capturing a word that states no direction', () => {
+    const vague = { ...GOOD, typeRegex: '(Transaction) Summary', typeValue: 'Transaction' }
+    const v = verdict(vague, 'type')
+    expect(v?.verified).toBe(false)
+    expect(v?.reason).toContain('no direction')
+  })
+
+  it('rejects an amount pattern that captures the balance instead', () => {
+    // Round-trips against its own declared value, so only comparing the two
+    // strings would pass this. It is wrong because the declared value is wrong.
+    const wrong = {
+      ...GOOD,
+      amountRegex: String.raw`Available Balance ([\d,]+\.\d{2})`,
+      amountValue: '4,989.25',
+    }
+    expect(verdict(wrong, 'amount')?.verified).toBe(false)
+  })
+
+  it('rejects a field whose declared value is absent', () => {
+    const { dateValue: _omitted, ...noDeclared } = GOOD
+    expect(verdict(noDeclared, 'date')?.verified).toBe(false)
   })
 })

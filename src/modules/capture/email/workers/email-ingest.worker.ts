@@ -230,11 +230,33 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     let parsedTx: ParsedTransaction | null = null
     let isVerified = false
 
+    // Hand-written parser first, AI as a FALLBACK — not an either/or.
+    //
+    // This was `if (static) {...} else {AI}`, so a hand-written parser that
+    // returned null ended the attempt and the AI never ran. That is not a
+    // theoretical concern: every one of these parsers was written against an
+    // imagined email format, and their tests encode the same imagination, so
+    // they pass in CI and return null on real mail. Access was proven wrong
+    // that way and fixed; the other nine are unverified against a real email.
+    //
+    // The concrete cost was measurable — opay.parser.ts claims
+    // opay-nigeria.com, failed all eleven real Opay emails, and blocked the AI
+    // that would otherwise have generated a working pattern for that domain.
+    // A broken parser was strictly worse than no parser at all.
     const staticParser = this.parserRegistry.getParserForDomain(email.senderDomain)
     if (staticParser !== null) {
       parsedTx = await staticParser.parse(email.subject, email.bodyHtml, email.bodyText)
-      isVerified = true
-    } else {
+      // Only a SUCCESSFUL hand-written parse is inherently trusted.
+      isVerified = parsedTx !== null
+    }
+
+    if (parsedTx === null) {
+      if (staticParser !== null) {
+        this.logger.info(
+          { messageId, senderDomain: email.senderDomain, parser: staticParser.parserId },
+          'Hand-written parser did not match; falling back to AI',
+        )
+      }
       const aiResult = await this.aiUniversalParser.parse(
         email.senderDomain,
         email.subject,

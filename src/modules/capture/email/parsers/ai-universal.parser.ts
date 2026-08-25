@@ -8,7 +8,7 @@ import {
   isPlausibleAmountKobo,
   redactForModel,
   runPattern,
-  verifyExtraction,
+  verifyPatternFields,
 } from './pattern-safety'
 
 export type AIUniversalParserDeps = {
@@ -83,11 +83,15 @@ export class AIUniversalParser {
     // Verified BEFORE parsing, not after. A pattern that parses to something is
     // not the same as a pattern that parses to the RIGHT thing, and this row is
     // about to become the rule for every user of this bank.
-    if (!this.isPatternTrustworthy(text, generatedPatterns)) {
+    // Screened ONCE, and everything downstream uses the result. Parsing or
+    // saving the raw generation would re-admit the very fields verification
+    // just rejected, which is the whole point of the gate.
+    const screened = this.screenPatterns(text, generatedPatterns)
+    if (screened === null) {
       return { tx: null, isVerified: false }
     }
 
-    const tx = this.parseWithPattern(text, generatedPatterns)
+    const tx = this.parseWithPattern(text, screened)
 
     // If parsing succeeds (i.e. amount and merchant found), save to DB with status LEARNING
     if (tx !== null) {
@@ -97,7 +101,7 @@ export class AIUniversalParser {
             senderDomain: normalizedDomain,
             bankName: this.inferBankName(senderDomain),
             status: 'LEARNING',
-            patterns: generatedPatterns,
+            patterns: screened,
             aiGenerated: true,
             confirmedByUsers: 0,
             version: 1,
@@ -226,29 +230,60 @@ export class AIUniversalParser {
    * pattern is saved and every future email from the bank parses to a
    * confident, wrong figure.
    */
-  private isPatternTrustworthy(text: string, patterns: Record<string, string>): boolean {
-    const amountRegexStr = patterns.amountRegex || patterns.amount_kobo
-    if (!amountRegexStr) return false
+  /**
+   * Verifies every field and returns only the patterns that earned their place.
+   *
+   * ── Why the policy differs per field ─────────────────────────────────────
+   * Verifying only the amount was a defensible start but an incomplete one. The
+   * right rule is not "verify everything or reject everything" — it is to weigh
+   * what being WRONG costs against what being ABSENT costs:
+   *
+   *   AMOUNT and TYPE are required. A wrong figure corrupts the ledger, and a
+   *   wrong direction turns income into spending — both silently, and both
+   *   poisoning every total the user reads. Neither has a safe default, so an
+   *   unverified one fails the whole pattern.
+   *
+   *   DATE, MERCHANT and BALANCE are dropped rather than fatal. Each has an
+   *   honest fallback — the email's own timestamp, a generic label, an absent
+   *   optional field — and losing a real transaction entirely is worse than
+   *   recording it with a slightly weaker label.
+   *
+   * Unverified patterns are STRIPPED from what gets saved, so a field that
+   * failed here can never be applied to a future email. parseWithPattern
+   * already falls back cleanly when a regex is absent, which is why removing
+   * the key is all this has to do.
+   */
+  private screenPatterns(
+    text: string,
+    patterns: Record<string, string>,
+  ): Record<string, string> | null {
+    const verdicts = verifyPatternFields(patterns, text, parseAmountKobo)
+    const failed = verdicts.filter((v) => !v.verified)
 
-    const amountCheck = checkPattern(amountRegexStr)
-    if (!amountCheck.ok) {
-      this.logger.warn({ reason: amountCheck.reason }, 'Generated amount pattern rejected as unsafe')
-      return false
-    }
-
-    // The amount is the only field required to round-trip. The others are
-    // useful but not load-bearing: a wrong merchant name is a cosmetic defect,
-    // a wrong amount is corrupt data.
-    const expected = patterns.amountValue || patterns.amount_value
-    if (!verifyExtraction(amountCheck.regex, text, expected)) {
+    const fatal = failed.filter((v) => v.field === 'amount' || v.field === 'type')
+    if (fatal.length > 0) {
       this.logger.warn(
-        { expected, actual: runPattern(amountCheck.regex, text) },
-        'Generated pattern failed round-trip verification — discarding',
+        { failures: fatal.map((v) => `${v.field}: ${v.reason ?? 'unverified'}`) },
+        'Generated pattern failed verification on a required field — discarding',
       )
-      return false
+      return null
     }
 
-    return true
+    const kept: Record<string, string> = { ...patterns }
+    for (const verdict of failed) {
+      for (const key of Object.keys(kept)) {
+        if (key.toLowerCase().startsWith(verdict.field)) delete kept[key]
+      }
+    }
+
+    if (failed.length > 0) {
+      this.logger.info(
+        { dropped: failed.map((v) => `${v.field}: ${v.reason ?? 'unverified'}`) },
+        'Generated pattern accepted with unverified fields removed',
+      )
+    }
+
+    return kept
   }
 
   private inferBankName(domain: string): string {

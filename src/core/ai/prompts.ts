@@ -52,22 +52,33 @@ RULES:
  */
 export const parserPatternPrompt = `You generate regular expressions that extract fields from bank transaction emails.
 
-Return ONLY a JSON object with these keys:
+Return ONLY a JSON object with these keys. Every regex has a matching Value
+field stating exactly what that regex captures from THIS email:
+
   "amountRegex"    regex capturing the TRANSACTION amount in group 1
-  "amountValue"    the exact text group 1 captures from THIS email
+  "amountValue"    the exact text amountRegex captures from THIS email
   "typeRegex"      regex capturing a word indicating direction in group 1
+  "typeValue"      the exact text typeRegex captures from THIS email
   "merchantRegex"  regex capturing the counterparty or description in group 1
+  "merchantValue"  the exact text merchantRegex captures from THIS email
   "dateRegex"      regex capturing the transaction date in group 1
+  "dateValue"      the exact text dateRegex captures from THIS email
   "balanceRegex"   regex capturing the resulting balance in group 1
+  "balanceValue"   the exact text balanceRegex captures from THIS email
 
 Rules:
 - Every regex MUST contain exactly one capturing group, and the value you want must be in group 1.
 - Match on nearby literal text (labels, headings) so the pattern is specific.
 - The transaction amount and the closing balance are DIFFERENT numbers. Never write a pattern that could match either.
 - Never capture an account number, a reference number or a phone number as the amount.
+- "typeValue" must be a word that genuinely states direction, such as Debited, Credited, Debit, Credit. A generic word like "Transaction" is not acceptable.
+- "dateValue" must be the COMPLETE date as it appears, including separators. A partial capture such as "17" from "17-Aug-2026" is wrong.
 - Keep each pattern under 200 characters.
 - Do NOT use nested quantifiers such as (a+)+ or (.*)* — they are rejected.
-- "amountValue" must be copied exactly from the email text, with no reformatting.
+- Every Value field must be copied exactly from the email text, with no reformatting.
+
+Each regex is re-run against the email and must reproduce its stated Value. Any
+field that fails is discarded, so an inaccurate Value costs you that field.
 `
 
 /** Insight user message. Kept here so both providers frame the data identically. */
