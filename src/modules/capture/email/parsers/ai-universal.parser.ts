@@ -3,6 +3,13 @@ import type { IAIProvider } from '../../../../core/ai/ai-provider.interface'
 import type { AppLogger } from '../../../../core/logger'
 import type { ParsedTransaction } from './parser.interface'
 import { parseAmountKobo, cleanText } from './utils'
+import {
+  checkPattern,
+  isPlausibleAmountKobo,
+  redactForModel,
+  runPattern,
+  verifyExtraction,
+} from './pattern-safety'
 
 export type AIUniversalParserDeps = {
   readonly prisma: PrismaClient
@@ -54,18 +61,32 @@ export class AIUniversalParser {
       'No pattern found. Requesting AI to generate new parser patterns.',
     )
 
-    // Call AI provider (circuit breaker is inside generateParserPattern)
-    const generatedPatterns = await this.aiProvider.generateParserPattern(text)
+    // Redacted before it leaves the process. The model needs the document's
+    // shape to write a regex, not the account holder's identity — and these
+    // bodies carry a full name, an account number and a running balance.
+    const generatedPatterns = await this.aiProvider.generateParserPattern(redactForModel(text))
 
     if (Object.keys(generatedPatterns).length === 0) {
+      // The provider's reason is pulled through when it can supply one. Without
+      // it, "no credit", "retired model", "bad key" and "breaker open" are one
+      // indistinguishable log line, and the difference between them is the
+      // difference between paying $2 and rewriting the integration.
+      const withReason = this.aiProvider as { getLastError?: () => string | undefined }
+      const reason = withReason.getLastError?.()
       this.logger.warn(
-        { senderDomain: normalizedDomain },
+        { senderDomain: normalizedDomain, ...(reason !== undefined ? { reason } : {}) },
         'AI provider failed to generate patterns or circuit breaker is open',
       )
       return { tx: null, isVerified: false }
     }
 
-    // Attempt to parse the email with the generated patterns
+    // Verified BEFORE parsing, not after. A pattern that parses to something is
+    // not the same as a pattern that parses to the RIGHT thing, and this row is
+    // about to become the rule for every user of this bank.
+    if (!this.isPatternTrustworthy(text, generatedPatterns)) {
+      return { tx: null, isVerified: false }
+    }
+
     const tx = this.parseWithPattern(text, generatedPatterns)
 
     // If parsing succeeds (i.e. amount and merchant found), save to DB with status LEARNING
@@ -109,23 +130,35 @@ export class AIUniversalParser {
 
       if (!amountRegexStr) return null
 
-      const amountRegex = new RegExp(amountRegexStr, 'i')
-      const amountMatch = text.match(amountRegex)
-      if (!amountMatch || !amountMatch[1]) return null
-      const amountKobo = parseAmountKobo(amountMatch[1])
+      // Every pattern goes through checkPattern, including ones already stored:
+      // a row saved before these checks existed, or edited in the database, is
+      // no more trustworthy than a fresh generation.
+      const amountCheck = checkPattern(amountRegexStr)
+      if (!amountCheck.ok) {
+        this.logger.warn({ reason: amountCheck.reason }, 'Rejected unsafe amount pattern')
+        return null
+      }
+      const amountRaw = runPattern(amountCheck.regex, text)
+      if (amountRaw === null) return null
+
+      const amountKobo = parseAmountKobo(amountRaw)
+      // A figure can extract cleanly and still be nonsense — a reference number,
+      // a year. Caching a nonsense parse as the rule for an entire bank is the
+      // expensive mistake, so the magnitude is checked before it can happen.
+      if (!isPlausibleAmountKobo(amountKobo)) {
+        this.logger.warn({ amountRaw }, 'Rejected implausible amount from pattern')
+        return null
+      }
 
       let type: 'DEBIT' | 'CREDIT' = 'DEBIT'
       if (typeRegexStr) {
-        const typeRegex = new RegExp(typeRegexStr, 'i')
-        const typeMatch = text.match(typeRegex)
-        if (typeMatch && typeMatch[1]) {
-          const typeVal = typeMatch[1].toUpperCase()
-          if (
-            typeVal.includes('CREDIT') ||
-            typeVal.includes('CR') ||
-            typeVal.includes('RECEIVED') ||
-            typeVal.includes('INWARD')
-          ) {
+        const typeCheck = checkPattern(typeRegexStr)
+        if (typeCheck.ok) {
+          const typeVal = runPattern(typeCheck.regex, text)?.toUpperCase() ?? ''
+          // Word-boundary matched, not substring. `includes('CR')` was the same
+          // bug that made the Access parser read every credit as a debit,
+          // because the bank's own footer contains the word "Address".
+          if (/\b(CREDIT|CR|RECEIVED|INWARD|DEPOSIT)\b/.test(typeVal)) {
             type = 'CREDIT'
           }
         }
@@ -133,31 +166,37 @@ export class AIUniversalParser {
 
       let merchantName = 'AI Captured Transaction'
       if (merchantRegexStr) {
-        const merchantRegex = new RegExp(merchantRegexStr, 'i')
-        const merchantMatch = text.match(merchantRegex)
-        if (merchantMatch && merchantMatch[1]) {
-          merchantName = merchantMatch[1].trim()
+        const merchantCheck = checkPattern(merchantRegexStr)
+        if (merchantCheck.ok) {
+          merchantName = runPattern(merchantCheck.regex, text) ?? merchantName
         }
       }
 
       let transactionDate = new Date()
       if (dateRegexStr) {
-        const dateRegex = new RegExp(dateRegexStr, 'i')
-        const dateMatch = text.match(dateRegex)
-        if (dateMatch && dateMatch[1]) {
-          const parsedDate = new Date(dateMatch[1].trim())
-          if (!isNaN(parsedDate.getTime())) {
-            transactionDate = parsedDate
+        const dateCheck = checkPattern(dateRegexStr)
+        if (dateCheck.ok) {
+          const dateRaw = runPattern(dateCheck.regex, text)
+          if (dateRaw !== null) {
+            const parsedDate = new Date(dateRaw)
+            if (!isNaN(parsedDate.getTime())) {
+              transactionDate = parsedDate
+            }
           }
         }
       }
 
       let balanceAfterKobo: bigint | undefined = undefined
       if (balanceRegexStr) {
-        const balanceRegex = new RegExp(balanceRegexStr, 'i')
-        const balanceMatch = text.match(balanceRegex)
-        if (balanceMatch && balanceMatch[1]) {
-          balanceAfterKobo = parseAmountKobo(balanceMatch[1])
+        const balanceCheck = checkPattern(balanceRegexStr)
+        if (balanceCheck.ok) {
+          const balanceRaw = runPattern(balanceCheck.regex, text)
+          if (balanceRaw !== null) {
+            const parsed = parseAmountKobo(balanceRaw)
+            // A bad balance must not discard an otherwise good transaction, so
+            // this drops the field rather than failing the parse.
+            if (isPlausibleAmountKobo(parsed)) balanceAfterKobo = parsed
+          }
         }
       }
 
@@ -172,6 +211,44 @@ export class AIUniversalParser {
       this.logger.warn({ err }, 'Error parsing text with patterns')
       return null
     }
+  }
+
+  /**
+   * Whether a freshly generated pattern may be saved and reused.
+   *
+   * The model returns each regex ALONGSIDE the value it claims that regex
+   * extracts from this email. Trust requires the regex to actually reproduce
+   * that value — a self-consistency check the model cannot pass by accident.
+   *
+   * This is what stops the dangerous silent failure: an amount regex that
+   * captures the masked account number produces `012******345`, which cannot
+   * round-trip against a declared amount of `4,989.25`. Without this, that
+   * pattern is saved and every future email from the bank parses to a
+   * confident, wrong figure.
+   */
+  private isPatternTrustworthy(text: string, patterns: Record<string, string>): boolean {
+    const amountRegexStr = patterns.amountRegex || patterns.amount_kobo
+    if (!amountRegexStr) return false
+
+    const amountCheck = checkPattern(amountRegexStr)
+    if (!amountCheck.ok) {
+      this.logger.warn({ reason: amountCheck.reason }, 'Generated amount pattern rejected as unsafe')
+      return false
+    }
+
+    // The amount is the only field required to round-trip. The others are
+    // useful but not load-bearing: a wrong merchant name is a cosmetic defect,
+    // a wrong amount is corrupt data.
+    const expected = patterns.amountValue || patterns.amount_value
+    if (!verifyExtraction(amountCheck.regex, text, expected)) {
+      this.logger.warn(
+        { expected, actual: runPattern(amountCheck.regex, text) },
+        'Generated pattern failed round-trip verification — discarding',
+      )
+      return false
+    }
+
+    return true
   }
 
   private inferBankName(domain: string): string {
