@@ -125,6 +125,9 @@ describe('ManualCaptureUseCase', () => {
       'Opay/shoprite',
       10000n,
       'opayshoprite',
+      // The user's stated direction reaches the categoriser rather than being
+      // inferred later from the sign of an amount.
+      'DEBIT',
     )
     expect(mockDeduplicator.getTransactionHash).toHaveBeenCalledWith('1234', 10000n, expect.any(Date))
     expect(mockDeduplicator.findDuplicate).toHaveBeenCalledWith('dedup-hash')

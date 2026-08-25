@@ -12,12 +12,47 @@
  * until someone switches providers. One definition, used by both.
  */
 
-/** Categorisation. `categoryNames` is the caller's allowed set. */
+/**
+ * Categorisation. `categoryNames` is the caller's allowed set.
+ *
+ * ── Why this prompt talks about people ───────────────────────────────────
+ * The generic version — "categorize this merchant" — assumes the counterparty
+ * is a business. In Nigerian retail banking it frequently is not: on a real
+ * account, most counterparties are individuals ("Mary Okafor Roe",
+ * "Peter Chukwu Poe"), because person-to-person transfers are how money
+ * ordinarily moves.
+ *
+ * A model asked to categorise a person's name will invent something plausible
+ * rather than admit the name carries no category. A confidently wrong category
+ * is worse than "uncategorised", because the user has no reason to re-check it.
+ * So the prompt names the case and tells the model exactly what to do with it.
+ *
+ * Direction is supplied for the same reason: it is often the deciding fact, and
+ * withholding it forces a guess.
+ */
 export function categorizePrompt(categoryNames: readonly string[]): string {
-  return `You are a financial transaction categorizer. Categorize the given merchant name into one of these categories: [${categoryNames.join(', ')}].
+  return `You categorize bank transactions for a Nigerian personal finance app.
+Choose one category from this list: [${categoryNames.join(', ')}].
+
+You are given the counterparty name, the amount, and the DIRECTION of the money.
+
+Direction matters:
+- DEBIT means money LEFT the user's account (spending, a transfer out, a fee).
+- CREDIT means money ARRIVED (income, a refund, a transfer in).
+A payment processor name on a CREDIT is usually income, not shopping.
+
+Counterparties are often PEOPLE, not businesses, because person-to-person
+transfers are ordinary here. When the counterparty is a personal name:
+- Use "transfers".
+- Do NOT guess a spending category from a person's name.
+
 Return a JSON object containing:
-- "category": the exact name of the matched category from the list.
-- "confidence": a number from 0 to 1 representing your confidence.
+- "category": the exact name of one category from the list.
+- "confidence": a number from 0 to 1.
+
+Report low confidence when the name genuinely does not identify a category.
+"uncategorised" with low confidence is the correct answer for an ambiguous
+counterparty, and is preferred over a confident guess.
 `
 }
 
@@ -72,7 +107,7 @@ Rules:
 - The transaction amount and the closing balance are DIFFERENT numbers. Never write a pattern that could match either.
 - Never capture an account number, a reference number or a phone number as the amount.
 - "typeValue" must be a word that genuinely states direction, such as Debited, Credited, Debit, Credit. A generic word like "Transaction" is not acceptable.
-- "dateValue" must be the COMPLETE date as it appears, including separators. A partial capture such as "17" from "17-Aug-2026" is wrong.
+- "dateValue" must be the COMPLETE date as it appears, including separators. A partial capture such as "05" from "05-Mar-2026" is wrong.
 - Keep each pattern under 200 characters.
 - Do NOT use nested quantifiers such as (a+)+ or (.*)* — they are rejected.
 - Every Value field must be copied exactly from the email text, with no reformatting.

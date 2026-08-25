@@ -20,7 +20,8 @@
     "prisma:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:seed": "tsx prisma/seed.ts",
-    "test:ai": "tsx scripts/test-ai-parser.ts"
+    "test:ai": "tsx scripts/test-ai-parser.ts",
+    "test:categorizer": "tsx scripts/test-categorizer.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

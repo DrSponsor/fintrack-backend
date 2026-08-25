@@ -66,6 +66,9 @@ export class CategorizerService {
     merchantName: string,
     amountKobo: bigint,
     fingerprint: string,
+    /** Which way the money moved. Frequently the deciding fact — the same
+     *  counterparty is income on a CREDIT and spending on a DEBIT. */
+    direction: 'DEBIT' | 'CREDIT',
   ): Promise<string> {
     const uncategorisedId = await this.getUncategorisedId()
 
@@ -107,7 +110,7 @@ export class CategorizerService {
           await this.redis.expire(aiKey, 35 * 24 * 60 * 60)
         }
 
-        const aiResult = await this.aiProvider.categorize(merchantName, amountKobo)
+        const aiResult = await this.aiProvider.categorize(merchantName, amountKobo, direction)
         if (aiResult.categoryId !== uncategorisedId && aiResult.confidence > 0.6) {
           // Save result for future exact matches
           await this.mappingRepo.saveMerchantMapping(

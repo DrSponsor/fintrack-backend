@@ -48,7 +48,7 @@ describe('CategorizerService', () => {
       logger: silentLogger,
     })
 
-    const result = await service.categorize('user-1', 'FREE', 'Opay/Shoprite', 1000n, 'opayshoprite')
+    const result = await service.categorize('user-1', 'FREE', 'Opay/Shoprite', 1000n, 'opayshoprite', 'DEBIT')
     expect(result).toBe('food-groceries-id')
     expect(mappingRepo.findMerchantMapping).toHaveBeenCalledWith('opayshoprite')
   })
@@ -65,7 +65,7 @@ describe('CategorizerService', () => {
       logger: silentLogger,
     })
 
-    const result = await service.categorize('user-1', 'FREE', 'Netflix', 1000n, 'netflix')
+    const result = await service.categorize('user-1', 'FREE', 'Netflix', 1000n, 'netflix', 'DEBIT')
     expect(result).toBe('subscriptions-id')
     expect(mappingRepo.findUserPreference).toHaveBeenCalledWith('user-1', 'netflix')
   })
@@ -86,7 +86,7 @@ describe('CategorizerService', () => {
       logger: silentLogger,
     })
 
-    const result = await service.categorize('user-1', 'FREE', 'Uber Lagos Ride', 1000n, 'uberlagosride')
+    const result = await service.categorize('user-1', 'FREE', 'Uber Lagos Ride', 1000n, 'uberlagosride', 'DEBIT')
     expect(result).toBe('transport-id')
   })
 
@@ -106,9 +106,11 @@ describe('CategorizerService', () => {
       logger: silentLogger,
     })
 
-    const result = await service.categorize('user-1', 'FREE', 'Showmax Subscription', 5000n, 'showmax')
+    const result = await service.categorize('user-1', 'FREE', 'Showmax Subscription', 5000n, 'showmax', 'DEBIT')
     expect(result).toBe('entertainment-id')
-    expect(aiProvider.categorize).toHaveBeenCalledWith('Showmax Subscription', 5000n)
+    // Direction is passed through to the model: the same counterparty means
+    // different things depending on which way the money moved.
+    expect(aiProvider.categorize).toHaveBeenCalledWith('Showmax Subscription', 5000n, 'DEBIT')
     expect(mappingRepo.saveMerchantMapping).toHaveBeenCalledWith('showmax', 'entertainment-id', 85)
   })
 
@@ -128,7 +130,7 @@ describe('CategorizerService', () => {
       logger: silentLogger,
     })
 
-    const result = await service.categorize('user-1', 'FREE', 'Showmax Subscription', 5000n, 'showmax')
+    const result = await service.categorize('user-1', 'FREE', 'Showmax Subscription', 5000n, 'showmax', 'DEBIT')
     // Fallback because AI confidence (0.4) <= 0.6
     expect(result).toBe('uncategorised-id')
     expect(mappingRepo.saveMerchantMapping).not.toHaveBeenCalled()
@@ -157,7 +159,7 @@ describe('CategorizerService', () => {
       logger: silentLogger,
     })
 
-    const result = await service.categorize('user-1', 'FREE', 'Showmax Subscription', 5000n, 'showmax')
+    const result = await service.categorize('user-1', 'FREE', 'Showmax Subscription', 5000n, 'showmax', 'DEBIT')
     expect(result).toBe('uncategorised-id')
     expect(aiProvider.categorize).not.toHaveBeenCalled()
   })

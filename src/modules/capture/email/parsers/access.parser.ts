@@ -11,13 +11,13 @@ import { parseAmountKobo, cleanText } from './utils'
  * no colons and no `Amt` label anywhere:
  *
  *     Your account has been Debited
- *     NGN 4,989.25
+ *     NGN 1,234.56
  *     Transaction Summary
  *     A/C Number          012******345
- *     Description         MOBILE TRF TO PAY/ /JOHN ADEBAYO
+ *     Description         MOBILE TRF TO PAY/ /MARY OKAFOR ROE
  *     Reference Number    312ABCD2600000AA
- *     Transaction Date    17-Aug-2026
- *     Available Balance   200,000.00
+ *     Transaction Date    05-Mar-2026
+ *     Available Balance   50,000.00
  *
  * Every field pattern therefore failed, and the amount pattern failed first,
  * so `parse` returned null for all 41 real alerts in the test mailbox. The unit
@@ -33,7 +33,7 @@ import { parseAmountKobo, cleanText } from './utils'
  *   Income appeared as spending. Same substring bug as the safety filter: two
  *   letters matched against a whole HTML body.
  *
- *   ONLY THE AMOUNT CARRIES "NGN". Available Balance prints bare (200,000.00),
+ *   ONLY THE AMOUNT CARRIES "NGN". Available Balance prints bare (50,000.00),
  *   so the currency prefix is what separates the transaction amount from the
  *   balance. Both are money on the same line after tag-stripping, and nothing
  *   else distinguishes them.
@@ -82,7 +82,7 @@ function field(text: string, label: string): string | null {
 }
 
 /**
- * Parses Access Bank's `17-Aug-2026`.
+ * Parses Access Bank's `05-Mar-2026`.
  *
  * Built explicitly rather than handed to `new Date(string)`, whose behaviour on
  * non-ISO input is implementation-defined — the previous parser relied on that
@@ -107,9 +107,9 @@ function parseAccessDate(value: string): Date | null {
  * Outbound and inbound put the counterparty at opposite ends, which is the same
  * asymmetry the SMS format has:
  *
- *   MOBILE TRF TO PAY/ /JOHN ADEBAYO   -> last segment
- *   Paystack/PSST10vKoAt88Afi071756082          -> first segment
- *   Transfer from YETUNDE TEMILOLA OLUYOMBO     -> after "from"
+ *   MOBILE TRF TO PAY/ /MARY OKAFOR ROE   -> last segment
+ *   Paystack/PSST00SAMPLE0000000000          -> first segment
+ *   Transfer from MARY OKAFOR ROE     -> after "from"
  */
 function readMerchant(description: string): string {
   const inbound = /\b(?:transfer|trf)\s+from\s+(.+)$/i.exec(description)

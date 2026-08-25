@@ -304,6 +304,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       normalizedName,
       parsedTx.amountKobo,
       fingerprint,
+      parsedTx.type,
     )
 
     // 9. DB Write (atomic, PgBouncer-safe transaction)

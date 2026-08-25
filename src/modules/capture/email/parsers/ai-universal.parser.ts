@@ -226,7 +226,7 @@ export class AIUniversalParser {
    *
    * This is what stops the dangerous silent failure: an amount regex that
    * captures the masked account number produces `012******345`, which cannot
-   * round-trip against a declared amount of `4,989.25`. Without this, that
+   * round-trip against a declared amount of `1,234.56`. Without this, that
    * pattern is saved and every future email from the bank parses to a
    * confident, wrong figure.
    */

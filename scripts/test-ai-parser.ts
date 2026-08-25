@@ -24,19 +24,19 @@ import { parseAmountKobo } from '../src/modules/capture/email/parsers/utils'
 
 /** The real Access Bank debit alert, flattened as cleanText leaves it. */
 const DEBIT =
-  'Dear JOHN ADEBAYO DOE, Your account has been Debited NGN 4,989.25 ' +
+  'Dear JOHN ADEBAYO DOE, Your account has been Debited NGN 1,234.56 ' +
   'Transaction Summary A/C Number 012******345 Account Name JOHN ADEBAYO DOE ' +
-  'Description MOBILE TRF TO PAY/ /JOHN ADEBAYO Reference Number 312ABCD2600000AA ' +
-  'Transaction Branch IDIMU BRANCH Transaction Date 17-Aug-2026 Value Date 17-Aug-2026 ' +
-  'Available Balance 200,000.00'
+  'Description MOBILE TRF TO PAY/ /MARY OKAFOR ROE Reference Number 312ABCD2600000AA ' +
+  'Transaction Branch SAMPLE BRANCH Transaction Date 05-Mar-2026 Value Date 05-Mar-2026 ' +
+  'Available Balance 50,000.00'
 
 /** The real credit alert. Different narrative shape, different counterparty position. */
 const CREDIT =
-  'Dear JOHN ADEBAYO DOE, Your account has been Credited NGN 14,475.00 ' +
+  'Dear JOHN ADEBAYO DOE, Your account has been Credited NGN 7,890.00 ' +
   'Transaction Summary A/C Number 012******345 Account Name JOHN ADEBAYO DOE ' +
-  'Description Paystack/PSST10vKoAt88Afi071756082 Reference Number 312NIPL2620500H4 ' +
-  'Transaction Branch IDIMU BRANCH Transaction Date 24-Jul-2026 Value Date 24-Jul-2026 ' +
-  'Available Balance 242,327.00'
+  'Description Paystack/PSST00SAMPLE0000000000 Reference Number 312WXYZ2600000BB ' +
+  'Transaction Branch SAMPLE BRANCH Transaction Date 12-Feb-2026 Value Date 12-Feb-2026 ' +
+  'Available Balance 57,890.00'
 
 /** Reads one key out of .env without pulling in a config loader. */
 function envValue(name: string): string {
@@ -136,8 +136,8 @@ async function run(label: string, text: string, expectedAmount: string): Promise
 }
 
 async function main(): Promise<void> {
-  const debit = await run('DEBIT alert', DEBIT, '4,989.25')
-  const credit = await run('CREDIT alert', CREDIT, '14,475.00')
+  const debit = await run('DEBIT alert', DEBIT, '1,234.56')
+  const credit = await run('CREDIT alert', CREDIT, '7,890.00')
 
   console.log(`\n${'='.repeat(66)}`)
   console.log(`debit: ${debit ? 'PASS' : 'FAIL'}   credit: ${credit ? 'PASS' : 'FAIL'}`)

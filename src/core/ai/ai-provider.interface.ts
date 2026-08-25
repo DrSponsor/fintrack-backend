@@ -14,7 +14,18 @@ export type ReportSummary = {
 export interface IAIProvider {
   readonly providerName: string
 
-  categorize(merchantName: string, amountKobo: bigint): Promise<CategorizationResult>
+  /**
+   * `direction` is not optional context — it is often the deciding fact.
+   *
+   * "Paystack" for ₦7,890 is income when the money arrives and a purchase when
+   * it leaves, and the merchant name alone cannot separate the two. Categorising
+   * without it was guesswork dressed as a decision.
+   */
+  categorize(
+    merchantName: string,
+    amountKobo: bigint,
+    direction: 'DEBIT' | 'CREDIT',
+  ): Promise<CategorizationResult>
 
   generateInsightNarrative(reportSummary: ReportSummary): Promise<string>
 

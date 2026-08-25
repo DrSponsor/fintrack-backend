@@ -34,7 +34,7 @@ function alertHtml(opts: {
       <tr><td>Account Name</td><td>JOHN ADEBAYO DOE</td></tr>
       <tr><td>Description</td><td>${opts.description}</td></tr>
       <tr><td>Reference Number</td><td>${opts.reference}</td></tr>
-      <tr><td>Transaction Branch</td><td>IDIMU BRANCH</td></tr>
+      <tr><td>Transaction Branch</td><td>SAMPLE BRANCH</td></tr>
       <tr><td>Transaction Date</td><td>${opts.transactionDate}</td></tr>
       <tr><td>Value Date</td><td>${opts.transactionDate}</td></tr>
       <tr><td>Available Balance</td><td>${opts.balance}</td></tr>
@@ -45,41 +45,41 @@ function alertHtml(opts: {
 
 const DEBIT = alertHtml({
   direction: 'Debited',
-  amount: '4,989.25',
-  description: 'MOBILE TRF TO PAY/ /JOHN ADEBAYO',
+  amount: '1,234.56',
+  description: 'MOBILE TRF TO PAY/ /MARY OKAFOR ROE',
   reference: '312ABCD2600000AA',
-  transactionDate: '17-Aug-2026',
-  balance: '200,000.00',
+  transactionDate: '05-Mar-2026',
+  balance: '50,000.00',
 })
 
 const CREDIT = alertHtml({
   direction: 'Credited',
-  amount: '14,475.00',
-  description: 'Paystack/PSST10vKoAt88Afi071756082',
-  reference: '312NIPL2620500H4',
-  transactionDate: '24-Jul-2026',
-  balance: '242,327.00',
+  amount: '7,890.00',
+  description: 'Paystack/PSST00SAMPLE0000000000',
+  reference: '312WXYZ2600000BB',
+  transactionDate: '12-Feb-2026',
+  balance: '57,890.00',
 })
 
 describe('AccessParser — real debit alert', () => {
   it('extracts every field', async () => {
     const result = await parser.parse('Access Bank Transaction Alert', DEBIT, '')
     expect(result).not.toBeNull()
-    expect(result?.amountKobo).toBe(498925n)
+    expect(result?.amountKobo).toBe(123456n)
     expect(result?.type).toBe('DEBIT')
-    expect(result?.balanceAfterKobo).toBe(20000000n)
+    expect(result?.balanceAfterKobo).toBe(5000000n)
   })
 
   it('dates the transaction from the alert, not from now', async () => {
     // The old parser produced Invalid Date and silently substituted the sync
     // time, which stamped every backfilled transaction with today.
     const result = await parser.parse('Access Bank Transaction Alert', DEBIT, '')
-    expect(result?.transactionDate.toISOString().slice(0, 10)).toBe('2026-08-17')
+    expect(result?.transactionDate.toISOString().slice(0, 10)).toBe('2026-03-05')
   })
 
   it('names the counterparty, not the transfer type', async () => {
     const result = await parser.parse('Access Bank Transaction Alert', DEBIT, '')
-    expect(result?.merchantName).toBe('JOHN ADEBAYO')
+    expect(result?.merchantName).toBe('MARY OKAFOR ROE')
   })
 })
 
@@ -94,9 +94,9 @@ describe('AccessParser — real credit alert', () => {
 
   it('extracts amount, balance and date', async () => {
     const result = await parser.parse('Access Bank Transaction Alert', CREDIT, '')
-    expect(result?.amountKobo).toBe(1447500n)
-    expect(result?.balanceAfterKobo).toBe(24232700n)
-    expect(result?.transactionDate.toISOString().slice(0, 10)).toBe('2026-07-24')
+    expect(result?.amountKobo).toBe(789000n)
+    expect(result?.balanceAfterKobo).toBe(5789000n)
+    expect(result?.transactionDate.toISOString().slice(0, 10)).toBe('2026-02-12')
   })
 
   it('takes the payer name, not the processor reference', async () => {
@@ -109,13 +109,13 @@ describe('AccessParser — real credit alert', () => {
     const html = alertHtml({
       direction: 'Credited',
       amount: '3,000.00',
-      description: 'Transfer from YETUNDE TEMILOLA OLUYOMBO',
-      reference: '312HABR2620200bk',
+      description: 'Transfer from MARY OKAFOR ROE',
+      reference: '312WXYZ2600003BE',
       transactionDate: '21-Jul-2026',
       balance: '204,923.50',
     })
     const result = await parser.parse('Access Bank Transaction Alert', html, '')
-    expect(result?.merchantName).toBe('YETUNDE TEMILOLA OLUYOMBO')
+    expect(result?.merchantName).toBe('MARY OKAFOR ROE')
     expect(result?.type).toBe('CREDIT')
   })
 })
@@ -124,10 +124,10 @@ describe('AccessParser — amount versus balance', () => {
   it('takes the NGN-prefixed amount, never the bare balance', async () => {
     // Both are money on the same flattened line after tag-stripping. Only the
     // amount carries the currency prefix, and picking the wrong one would
-    // record a ₦200,000 purchase instead of a ₦4,989.25 one.
+    // record a ₦200,000 purchase instead of a ₦1,234.56 one.
     const result = await parser.parse('Access Bank Transaction Alert', DEBIT, '')
-    expect(result?.amountKobo).toBe(498925n)
-    expect(result?.amountKobo).not.toBe(20000000n)
+    expect(result?.amountKobo).toBe(123456n)
+    expect(result?.amountKobo).not.toBe(5000000n)
   })
 })
 
@@ -138,7 +138,7 @@ describe('AccessParser — rejects what it should', () => {
   })
 
   it('returns null when the direction sentence is missing', async () => {
-    const result = await parser.parse('Access Bank', '<p>NGN 4,989.25 statement enclosed</p>', '')
+    const result = await parser.parse('Access Bank', '<p>NGN 1,234.56 statement enclosed</p>', '')
     expect(result).toBeNull()
   })
 })

@@ -69,6 +69,7 @@ export class ManualCaptureUseCase {
       normalizedName,
       amountKobo,
       fingerprint,
+      type,
     )
 
     // 3. Deduplication

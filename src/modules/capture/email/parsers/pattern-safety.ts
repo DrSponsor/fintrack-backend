@@ -17,7 +17,7 @@
  *   THE PATTERN LIES. Far more dangerous, because it is silent. Consider a
  *   generated amount regex that happens to capture the masked account number:
  *
- *       parseAmountKobo('012******345')  ->  196257  ->  NGN 1,962.57
+ *       parseAmountKobo('012******345')  ->  1234500  ->  NGN 12,345.00
  *
  *   Plausible, wrong, and then cached and replayed against every future email
  *   from that bank. Corrupt financial data that looks authoritative is a worse
@@ -27,7 +27,7 @@
  * `verifyExtraction` is the answer to the second: the model must state what it
  * expects each regex to extract, and the regex must actually reproduce that
  * value before the pattern is trusted. A regex that grabs the account number
- * cannot round-trip against a declared amount of "4,989.25".
+ * cannot round-trip against a declared amount of "1,234.56".
  */
 
 /** Longest text we will ever run a generated pattern against. Bank emails are
@@ -197,7 +197,7 @@ export function readDirection(value: string): 'DEBIT' | 'CREDIT' | null {
  * `new Date('17')` yields a valid Date object in the year 2001, so "valid" is
  * not the same as "sane". This is what stops a truncated capture — the exact
  * failure the old Access parser had, where a character class missing '/' turned
- * 17/08/2026 into 17 — from being cached as a bank's date rule.
+ * 05/03/2026 into 17 — from being cached as a bank's date rule.
  *
  * Ten years back covers any statement backfill worth having; one day forward
  * allows for timezone skew without admitting dates from next year.

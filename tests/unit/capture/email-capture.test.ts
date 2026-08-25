@@ -73,8 +73,8 @@ describe('SafetyFilterService', () => {
   /** A real Access Bank alert: the bank's standard security footer, plus the
    *  kind of tracking pixel every HTML mail carries. */
   const REAL_BANK_ALERT_BODY =
-    'Debit Alert Amt:NGN4,989.25 Acc:012******345 ' +
-    'Desc:312ABCD2600000AA/MOBILE TRF TO PAY Date:17/08/2026 Avail Bal:NGN200,000.00 ' +
+    'Debit Alert Amt:NGN1,234.56 Acc:012******345 ' +
+    'Desc:312ABCD2600000AA/MOBILE TRF TO PAY Date:05/03/2026 Avail Bal:NGN50,000.00 ' +
     '<img src="https://t.example.com/px/a2fa9c1b7e"> ' +
     'Access Bank will never ask you to disclose your PIN, password or OTP to anyone.'
 

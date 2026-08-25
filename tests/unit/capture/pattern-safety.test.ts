@@ -10,16 +10,16 @@ import {
 import { parseAmountKobo } from '../../../src/modules/capture/email/parsers/utils'
 
 /**
- * The real Access Bank email, flattened the way cleanText leaves it. Used as
+ * A synthetic Access Bank email, flattened the way cleanText leaves it. Used as
  * the substrate for every test here so that "safe" and "correct" are judged
- * against a document that actually exists.
+ * against the structure of a document that actually exists.
  */
 const REAL_EMAIL =
-  'Dear JOHN ADEBAYO DOE, Your account has been Debited NGN 4,989.25 ' +
+  'Dear JOHN ADEBAYO DOE, Your account has been Debited NGN 1,234.56 ' +
   'Transaction Summary A/C Number 012******345 Account Name JOHN ADEBAYO DOE ' +
-  'Description MOBILE TRF TO PAY/ /JOHN ADEBAYO Reference Number 312ABCD2600000AA ' +
-  'Transaction Branch IDIMU BRANCH Transaction Date 17-Aug-2026 Value Date 17-Aug-2026 ' +
-  'Available Balance 200,000.00'
+  'Description MOBILE TRF TO PAY/ /MARY OKAFOR ROE Reference Number 312ABCD2600000AA ' +
+  'Transaction Branch SAMPLE BRANCH Transaction Date 05-Mar-2026 Value Date 05-Mar-2026 ' +
+  'Available Balance 50,000.00'
 
 describe('checkPattern — rejecting patterns that can hang the worker', () => {
   it('rejects nested quantifiers, the classic catastrophic-backtracking shape', () => {
@@ -59,7 +59,7 @@ describe('runPattern', () => {
   it('extracts group 1 from the real email', () => {
     const check = checkPattern('been\\s+\\w+\\s+NGN\\s+([0-9,]+\\.[0-9]{2})')
     expect(check.ok).toBe(true)
-    if (check.ok) expect(runPattern(check.regex, REAL_EMAIL)).toBe('4,989.25')
+    if (check.ok) expect(runPattern(check.regex, REAL_EMAIL)).toBe('1,234.56')
   })
 
   it('returns null rather than throwing when nothing matches', () => {
@@ -72,12 +72,12 @@ describe('verifyExtraction — the round-trip that makes a pattern trustworthy',
   it('accepts a regex that reproduces the value the model declared', () => {
     const check = checkPattern('Debited\\s+NGN\\s+([0-9,]+\\.[0-9]{2})')
     expect(check.ok).toBe(true)
-    if (check.ok) expect(verifyExtraction(check.regex, REAL_EMAIL, '4,989.25')).toBe(true)
+    if (check.ok) expect(verifyExtraction(check.regex, REAL_EMAIL, '1,234.56')).toBe(true)
   })
 
   it('tolerates cosmetic differences in how the model writes the value', () => {
     const check = checkPattern('Debited\\s+NGN\\s+([0-9,]+\\.[0-9]{2})')
-    if (check.ok) expect(verifyExtraction(check.regex, REAL_EMAIL, 'NGN 4,989.25')).toBe(true)
+    if (check.ok) expect(verifyExtraction(check.regex, REAL_EMAIL, 'NGN 1,234.56')).toBe(true)
   })
 
   it('REJECTS a regex that captures the account number instead of the amount', () => {
@@ -88,7 +88,7 @@ describe('verifyExtraction — the round-trip that makes a pattern trustworthy',
     expect(check.ok).toBe(true)
     if (check.ok) {
       expect(runPattern(check.regex, REAL_EMAIL)).toBe('012******345')
-      expect(verifyExtraction(check.regex, REAL_EMAIL, '4,989.25')).toBe(false)
+      expect(verifyExtraction(check.regex, REAL_EMAIL, '1,234.56')).toBe(false)
     }
   })
 
@@ -97,8 +97,8 @@ describe('verifyExtraction — the round-trip that makes a pattern trustworthy',
     // and only the round-trip separates them.
     const check = checkPattern('Available Balance\\s+([0-9,]+\\.[0-9]{2})')
     if (check.ok) {
-      expect(runPattern(check.regex, REAL_EMAIL)).toBe('200,000.00')
-      expect(verifyExtraction(check.regex, REAL_EMAIL, '4,989.25')).toBe(false)
+      expect(runPattern(check.regex, REAL_EMAIL)).toBe('50,000.00')
+      expect(verifyExtraction(check.regex, REAL_EMAIL, '1,234.56')).toBe(false)
     }
   })
 
@@ -114,13 +114,13 @@ describe('isPlausibleAmountKobo', () => {
   })
 
   it('accepts an ordinary transaction', () => {
-    expect(isPlausibleAmountKobo(parseAmountKobo('4,989.25'))).toBe(true)
+    expect(isPlausibleAmountKobo(parseAmountKobo('1,234.56'))).toBe(true)
   })
 
   it('rejects a reference number misread as an amount', () => {
-    // 312ABCD2600000AA stripped of letters is 3122622900 -> parsed as naira
+    // 312ABCD2600000AA stripped of letters is 3122600000 -> parsed as naira
     // this is over 31 billion, which no retail alert reports.
-    expect(isPlausibleAmountKobo(parseAmountKobo('3122622900') * 100n)).toBe(false)
+    expect(isPlausibleAmountKobo(parseAmountKobo('3122600000') * 100n)).toBe(false)
   })
 })
 
@@ -149,7 +149,7 @@ describe('redactForModel', () => {
   })
 
   it('KEEPS the amount, which the model must see to write a pattern for it', () => {
-    expect(redactForModel(REAL_EMAIL)).toContain('4,989.25')
+    expect(redactForModel(REAL_EMAIL)).toContain('1,234.56')
   })
 
   it('keeps the labels the pattern will anchor on', () => {
@@ -160,13 +160,13 @@ describe('redactForModel', () => {
 })
 
 describe('verifyPatternFields — every field, not just the amount', () => {
-  // The real Access Bank debit alert, flattened as cleanText leaves it.
+  // A synthetic Access Bank debit alert, flattened as cleanText leaves it.
   const EMAIL =
-    'Dear JOHN ADEBAYO DOE, Your account has been Debited NGN 4,989.25 ' +
+    'Dear JOHN ADEBAYO DOE, Your account has been Debited NGN 1,234.56 ' +
     'Transaction Summary A/C Number 012******345 Account Name JOHN ADEBAYO DOE ' +
-    'Description MOBILE TRF TO PAY/ /JOHN ADEBAYO Reference Number 312ABCD2600000AA ' +
-    'Transaction Branch IDIMU BRANCH Transaction Date 17-Aug-2026 Value Date 17-Aug-2026 ' +
-    'Available Balance 200,000.00'
+    'Description MOBILE TRF TO PAY/ /MARY OKAFOR ROE Reference Number 312ABCD2600000AA ' +
+    'Transaction Branch SAMPLE BRANCH Transaction Date 05-Mar-2026 Value Date 05-Mar-2026 ' +
+    'Available Balance 50,000.00'
 
   // String.raw throughout. These are regex SOURCES stored as strings, so a
   // plain literal silently eats the backslashes — '\d' becomes 'd', and the
@@ -175,15 +175,15 @@ describe('verifyPatternFields — every field, not just the amount', () => {
   // broken.
   const GOOD: Record<string, string> = {
     amountRegex: String.raw`Debited NGN ([\d,]+\.\d{2})`,
-    amountValue: '4,989.25',
+    amountValue: '1,234.56',
     typeRegex: String.raw`(Debited)`,
     typeValue: 'Debited',
     merchantRegex: String.raw`Description ([A-Z0-9/ ]+?) Reference`,
-    merchantValue: 'MOBILE TRF TO PAY/ /JOHN ADEBAYO',
+    merchantValue: 'MOBILE TRF TO PAY/ /MARY OKAFOR ROE',
     dateRegex: String.raw`Transaction Date ([0-9]{2}-[A-Za-z]{3}-[0-9]{4})`,
-    dateValue: '17-Aug-2026',
+    dateValue: '05-Mar-2026',
     balanceRegex: String.raw`Available Balance ([\d,]+\.\d{2})`,
-    balanceValue: '200,000.00',
+    balanceValue: '50,000.00',
   }
 
   const verdict = (patterns: Record<string, string>, field: string) =>
@@ -196,7 +196,7 @@ describe('verifyPatternFields — every field, not just the amount', () => {
 
   it('rejects a date pattern that captures only part of the date', () => {
     // The exact defect the hand-written Access parser had: a character class
-    // missing '/' turned 17/08/2026 into "17", which new Date() happily reads
+    // missing '/' turned 05/03/2026 into "17", which new Date() happily reads
     // as the year 2001.
     const truncated = { ...GOOD, dateRegex: 'Transaction Date ([0-9]{2})', dateValue: '17' }
     expect(verdict(truncated, 'date')?.verified).toBe(false)
@@ -215,7 +215,7 @@ describe('verifyPatternFields — every field, not just the amount', () => {
     const wrong = {
       ...GOOD,
       amountRegex: String.raw`Available Balance ([\d,]+\.\d{2})`,
-      amountValue: '4,989.25',
+      amountValue: '1,234.56',
     }
     expect(verdict(wrong, 'amount')?.verified).toBe(false)
   })

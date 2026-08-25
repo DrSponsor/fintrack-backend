@@ -171,9 +171,15 @@ export class GeminiProvider implements IAIProvider {
     return text
   }
 
-  public async categorize(merchantName: string, amountKobo: bigint): Promise<CategorizationResult> {
+  public async categorize(
+    merchantName: string,
+    amountKobo: bigint,
+    direction: 'DEBIT' | 'CREDIT',
+  ): Promise<CategorizationResult> {
     const systemPrompt = categorizePrompt(Array.from(this.categoriesMap.keys()))
-    const userPrompt = `Merchant: "${merchantName}", Amount in Kobo: ${amountKobo.toString()}`
+    const userPrompt = `Counterparty: "${merchantName}"
+Amount in Kobo: ${amountKobo.toString()}
+Direction: ${direction}`
 
     try {
       const responseText = await this.breaker.fire('categorize', systemPrompt, userPrompt)
