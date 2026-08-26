@@ -210,8 +210,48 @@ export function isPlausibleTransactionDate(date: Date, now: Date = new Date()): 
   return date >= tenYearsAgo && date <= tomorrow
 }
 
+/**
+ * Whether a captured string can serve as a bank's transaction identifier.
+ *
+ * This gate matters more than its size suggests, because a reference is used as
+ * an EQUALITY test elsewhere: two records carrying the same one are treated as
+ * the same money. A capture that is not actually an identifier therefore has a
+ * failure mode the other fields do not — if a pattern latches onto something
+ * CONSTANT in the bank's template, every transaction from that bank shares a
+ * "reference", and payments start collapsing into each other.
+ *
+ * So the shape is checked narrowly:
+ *
+ *   Length and charset. Real references are compact alphanumeric runs, with at
+ *   most the separators banks use. Prose fails immediately.
+ *
+ *   Digits. An identifier that carries no digits is almost certainly a captured
+ *   word — "Description", "Transfer" — that happens to sit where the reference
+ *   should be.
+ *
+ *   Dates are rejected explicitly. "05-Mar-2026" satisfies both rules above and
+ *   is the single most likely wrong capture, since it sits in the adjacent
+ *   table row. Every alert on a given day would share it.
+ *
+ * Shape alone cannot prove uniqueness, so this is only half the defence. The
+ * other half is at ingest, where a reference already attached to a DIFFERENT
+ * amount on the same account is discarded as not an identifier at all.
+ */
+const REFERENCE_SHAPE = /^[A-Za-z0-9][A-Za-z0-9/_-]{4,63}$/
+const AT_LEAST_ONE_DIGIT = /\d/
+/** "05-Mar-2026", "2026-03-05", "05/03/2026" — the adjacent-row mis-capture. */
+const DATE_SHAPE = /^\d{1,4}[-/](?:[A-Za-z]{3,}|\d{1,2})[-/]\d{1,4}$/
+
+export function isPlausibleReference(value: string): boolean {
+  const trimmed = value.trim()
+  if (!REFERENCE_SHAPE.test(trimmed)) return false
+  if (!AT_LEAST_ONE_DIGIT.test(trimmed)) return false
+  if (DATE_SHAPE.test(trimmed)) return false
+  return true
+}
+
 /** Fields a generated pattern set can describe. */
-export type PatternField = 'amount' | 'type' | 'merchant' | 'date' | 'balance'
+export type PatternField = 'amount' | 'type' | 'merchant' | 'date' | 'balance' | 'reference'
 
 export type FieldVerdict = {
   readonly field: PatternField
@@ -228,6 +268,7 @@ const FIELD_KEYS: Readonly<Record<PatternField, readonly [string, string, string
   merchant: ['merchantRegex', 'merchant_name', 'merchantValue', 'merchant_value'],
   date: ['dateRegex', 'date', 'dateValue', 'date_value'],
   balance: ['balanceRegex', 'balance_kobo', 'balanceValue', 'balance_value'],
+  reference: ['referenceRegex', 'reference', 'referenceValue', 'reference_value'],
 }
 
 /**
@@ -293,6 +334,11 @@ export function verifyPatternFields(
 
     if (field === 'date' && !isPlausibleTransactionDate(new Date(captured))) {
       verdicts.push({ field, verified: false, reason: `implausible date: ${captured}` })
+      continue
+    }
+
+    if (field === 'reference' && !isPlausibleReference(captured)) {
+      verdicts.push({ field, verified: false, reason: `not an identifier: ${captured}` })
       continue
     }
 

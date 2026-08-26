@@ -214,3 +214,66 @@ describe('ReconciliationService', () => {
     expect(ReconciliationService.windowMs).toBe(WIDE_WINDOW_MS)
   })
 })
+
+describe('the bank reference', () => {
+  // The one signal here that is not a judgement call. Amount, time and
+  // counterparty can all coincide between two separate payments; a bank's own
+  // transaction id cannot.
+
+  it('separates two payments the fuzzy rules would have questioned', () => {
+    // ₦500 of airtime twice in one day: same merchant, same amount, same
+    // account. Without references this is 'uncertain' and both rows are kept on
+    // suspicion. With them it is simply two payments, decided.
+    const verdict = service.reconcile(
+      incoming({ source: 'EMAIL', merchantName: 'Airtel', reference: 'REF00000002' }),
+      [
+        candidate({
+          source: 'EMAIL',
+          merchantName: 'Airtel',
+          reference: 'REF00000001',
+          transactionDate: at(-9 * 60 * MINUTES),
+        }),
+      ],
+    )
+    expect(verdict.kind).toBe('distinct')
+  })
+
+  it('separates them even when everything else says the same event', () => {
+    // Inside the tight window, with an agreeing merchant, this would otherwise
+    // be suppressed as one alert delivered twice.
+    const verdict = service.reconcile(
+      incoming({ source: 'EMAIL', reference: 'REF00000002' }),
+      [candidate({ source: 'EMAIL', reference: 'REF00000001', transactionDate: at(30 * 1000) })],
+    )
+    expect(verdict.kind).toBe('distinct')
+  })
+
+  it('leaves the decision alone when only one side has a reference', () => {
+    // A manual entry never carries one, and half a comparison is no evidence.
+    // The fuzzy rules must still reach their own answer.
+    const verdict = service.reconcile(
+      incoming({ source: 'EMAIL', reference: 'REF00000002' }),
+      [candidate({ source: 'MANUAL', reference: undefined })],
+    )
+    expect(verdict.kind).toBe('supersedes')
+  })
+
+  it('does not let a matching reference override the ordinary rules', () => {
+    // Equality is deliberately NOT decided here. Trusting it would mean
+    // suppressing a real payment on the strength of a value this class cannot
+    // verify is unique, so that call is made at ingest, where the reference can
+    // be checked against every row already carrying it.
+    const verdict = service.reconcile(
+      incoming({ source: 'EMAIL', merchantName: 'Airtel', reference: 'REF00000001' }),
+      [
+        candidate({
+          source: 'EMAIL',
+          merchantName: 'Airtel',
+          reference: 'REF00000001',
+          transactionDate: at(30 * 1000),
+        }),
+      ],
+    )
+    expect(verdict.kind).toBe('already-recorded')
+  })
+})

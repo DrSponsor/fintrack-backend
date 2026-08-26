@@ -6,6 +6,7 @@ import {
   isPlausibleAmountKobo,
   redactForModel,
   verifyPatternFields,
+  isPlausibleReference,
 } from '../../../src/modules/capture/email/parsers/pattern-safety'
 import { parseAmountKobo } from '../../../src/modules/capture/email/parsers/utils'
 
@@ -184,12 +185,14 @@ describe('verifyPatternFields — every field, not just the amount', () => {
     dateValue: '05-Mar-2026',
     balanceRegex: String.raw`Available Balance ([\d,]+\.\d{2})`,
     balanceValue: '50,000.00',
+    referenceRegex: String.raw`Reference Number ([A-Z0-9]+)`,
+    referenceValue: '312ABCD2600000AA',
   }
 
   const verdict = (patterns: Record<string, string>, field: string) =>
     verifyPatternFields(patterns, EMAIL, parseAmountKobo).find((v) => v.field === field)
 
-  it('verifies all five fields of a correct pattern set', () => {
+  it('verifies every field of a correct pattern set', () => {
     const verdicts = verifyPatternFields(GOOD, EMAIL, parseAmountKobo)
     expect(verdicts.every((v) => v.verified)).toBe(true)
   })
@@ -223,5 +226,46 @@ describe('verifyPatternFields — every field, not just the amount', () => {
   it('rejects a field whose declared value is absent', () => {
     const { dateValue: _omitted, ...noDeclared } = GOOD
     expect(verdict(noDeclared, 'date')?.verified).toBe(false)
+  })
+})
+
+describe('isPlausibleReference', () => {
+  // This gate carries more weight than its size suggests: a reference is used
+  // as an EQUALITY test, so a capture that is not really an identifier can make
+  // two separate payments look like one.
+
+  it('accepts the identifiers banks actually print', () => {
+    expect(isPlausibleReference('312ABCD2600000AA')).toBe(true)
+    expect(isPlausibleReference('000015240315123456789')).toBe(true)
+    expect(isPlausibleReference('NIP/2026/0000123')).toBe(true)
+    expect(isPlausibleReference('REF_88213004')).toBe(true)
+  })
+
+  it('rejects a date, which is the likeliest wrong capture', () => {
+    // It sits in the table row next to the reference, and it satisfies both the
+    // charset and the digit rule. Every alert on a given day would share it, so
+    // a day's payments of equal amount would start collapsing together.
+    expect(isPlausibleReference('05-Mar-2026')).toBe(false)
+    expect(isPlausibleReference('2026-03-05')).toBe(false)
+    expect(isPlausibleReference('05/03/2026')).toBe(false)
+  })
+
+  it('rejects a captured word carrying no digits', () => {
+    // An identifier without digits is almost certainly a label the pattern
+    // latched onto — and a label is constant across every alert from the bank.
+    expect(isPlausibleReference('Description')).toBe(false)
+    expect(isPlausibleReference('SAMPLE BRANCH')).toBe(false)
+  })
+
+  it('rejects prose and anything too short to identify a payment', () => {
+    expect(isPlausibleReference('MOBILE TRF TO PAY')).toBe(false)
+    expect(isPlausibleReference('12')).toBe(false)
+    expect(isPlausibleReference('')).toBe(false)
+  })
+
+  it('rejects an amount', () => {
+    // Separators are outside the charset, so a figure can never be mistaken for
+    // an identifier.
+    expect(isPlausibleReference('1,234.56')).toBe(false)
   })
 })

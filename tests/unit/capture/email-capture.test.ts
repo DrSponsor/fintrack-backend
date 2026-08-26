@@ -577,6 +577,97 @@ describe('EmailIngestWorker', () => {
       )
     })
 
+    describe('the bank reference', () => {
+      /** A parsed alert that states the bank's own transaction id. */
+      function withReference(reference: string) {
+        return {
+          parse: vi.fn().mockResolvedValue({
+            tx: {
+              merchantName: 'POS Purchase',
+              amountKobo: 100000n,
+              type: 'DEBIT',
+              transactionDate: new Date(),
+              balanceAfterKobo: 500000n,
+              reference,
+            },
+            isVerified: false,
+          }),
+        }
+      }
+
+      it('suppresses an alert whose reference is already recorded', async () => {
+        // The exact answer, and the one the 36-hour matching window cannot
+        // give: a redelivery days later under a new message id still resolves.
+        const { deps, mockEmailAccessLogRepo } = makeDeps({
+          aiUniversalParser: withReference('REF00000001'),
+          transactionRepo: {
+            create: vi.fn(),
+            findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+            findByProviderRef: vi.fn().mockResolvedValue([
+              { id: 'existing-1', amountKobo: '100000', type: 'DEBIT', source: 'EMAIL', categoryId: 'c1' },
+            ]),
+            findMatchCandidates: vi.fn().mockResolvedValue([]),
+            supersede: vi.fn(),
+          },
+        })
+        await (new EmailIngestWorker(deps) as any).processJob(mockJob)
+
+        expect(deps.transactionRepo.create).not.toHaveBeenCalled()
+        expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ outcome: 'DUPLICATE_SUPPRESSED' }),
+        )
+      })
+
+      it('supersedes a placeholder identified by reference', async () => {
+        const { deps } = makeDeps({
+          aiUniversalParser: withReference('REF00000001'),
+          transactionRepo: {
+            create: vi.fn(),
+            findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+            findByProviderRef: vi.fn().mockResolvedValue([
+              { id: 'placeholder-1', amountKobo: '100000', type: 'DEBIT', source: 'MANUAL', categoryId: 'chosen' },
+            ]),
+            findMatchCandidates: vi.fn().mockResolvedValue([]),
+            supersede: vi.fn().mockResolvedValue({ id: 'placeholder-1' }),
+          },
+        })
+        await (new EmailIngestWorker(deps) as any).processJob(mockJob)
+
+        expect(deps.transactionRepo.create).not.toHaveBeenCalled()
+        expect(deps.transactionRepo.supersede).toHaveBeenCalledWith(
+          'placeholder-1',
+          expect.objectContaining({ providerRef: 'REF00000001', categoryId: 'chosen' }),
+        )
+      })
+
+      it('refuses to trust a reference attached to a different amount', async () => {
+        // How a reference pattern actually fails: it latches onto something
+        // CONSTANT in the template. A constant would be shared by every alert
+        // from that bank, so unrelated payments would start collapsing into
+        // one another. A row carrying it with a different amount is proof the
+        // value is not an identifier, and it is dropped rather than acted on.
+        const { deps } = makeDeps({
+          aiUniversalParser: withReference('TEMPLATE-CONSTANT-9'),
+          transactionRepo: {
+            create: vi.fn().mockResolvedValue({ id: 'tx-new' }),
+            findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+            findByProviderRef: vi.fn().mockResolvedValue([
+              { id: 'unrelated', amountKobo: '999999', type: 'DEBIT', source: 'EMAIL', categoryId: 'c1' },
+            ]),
+            findMatchCandidates: vi.fn().mockResolvedValue([]),
+            supersede: vi.fn(),
+          },
+        })
+        await (new EmailIngestWorker(deps) as any).processJob(mockJob)
+
+        // The transaction is still recorded — the alert is real, only the
+        // reference was not — and the bad value never reaches the table.
+        expect(deps.transactionRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ providerRef: undefined }),
+        )
+      })
+    })
+
     it('does not let a logging failure break transaction ingestion', async () => {
       const { deps, mockEmailAccessLogRepo } = makeDeps()
       mockEmailAccessLogRepo.create.mockRejectedValue(new Error('DB write failed'))

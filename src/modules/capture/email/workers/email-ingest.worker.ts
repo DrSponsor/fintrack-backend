@@ -3,7 +3,7 @@ import { BaseWorker } from '../../../../core/queue/base-worker'
 import { QUEUE_NAMES } from '../../../../core/queue/queues'
 import type { PrismaClient } from '../../../../generated/prisma/client'
 import type { IAccountRepository } from '../../../accounts/repositories/account.repo'
-import type { ITransactionRepository } from '../../../transactions/repositories/transaction.repo'
+import type { ITransactionRepository, TransactionRecord } from '../../../transactions/repositories/transaction.repo'
 import type { IEmailAccessLogRepository } from '../repositories/email-access-log.repo'
 import type { OAuthService } from '../services/oauth.service'
 import { GmailQuotaExhaustedError } from '../services/fetch.service'
@@ -114,6 +114,59 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     } catch (err) {
       this.logger.error({ err, messageId, outcome }, 'Failed to write email access log entry')
     }
+  }
+
+  /**
+   * Rewrites a manual placeholder in place with the bank's version of the same
+   * payment, keeping its id so the user's own correction, any budget alert
+   * raised against it, and any screen holding it all stay valid.
+   *
+   * The category is deliberately left alone. It is the one field the user may
+   * have chosen deliberately, and after the fact a deliberate choice is
+   * indistinguishable from the categoriser's guess — so re-deriving it from the
+   * bank's merchant string risks silently discarding real input. A wrong
+   * category is one tap to fix, and fixing it teaches the shared map under the
+   * correct merchant name.
+   *
+   * Shared by both routes that can reach this conclusion: an exact match on the
+   * bank's reference, and the windowed fuzzy match.
+   */
+  private async supersedePlaceholder(
+    placeholder: TransactionRecord,
+    context: {
+      readonly accountId: string
+      readonly messageId: string
+      readonly normalizedName: string
+      readonly parsedTx: ParsedTransaction
+      readonly isVerified: boolean
+      readonly reference: string | undefined
+      readonly account: { readonly userId: string }
+      readonly email: GmailEmailDetails
+    },
+  ): Promise<void> {
+    const superseded = await this.transactionRepo.supersede(placeholder.id, {
+      merchantName: context.normalizedName,
+      categoryId: placeholder.categoryId,
+      transactionDate: context.parsedTx.transactionDate,
+      source: 'EMAIL',
+      idempotencyKey: context.messageId,
+      isVerified: context.isVerified,
+      balanceAfterKobo: context.parsedTx.balanceAfterKobo,
+      providerRef: context.reference,
+    })
+
+    this.logger.info(
+      { messageId: context.messageId, transactionId: superseded.id },
+      'Bank alert superseded a manually entered transaction',
+    )
+    await this.logEmailAccess(
+      context.account.userId,
+      context.accountId,
+      context.messageId,
+      context.email.senderDomain,
+      context.email.subject,
+      'TRANSACTION_CREATED',
+    )
   }
 
   private async processJob(job: Job<EmailIngestJobData, void, string>): Promise<void> {
@@ -291,7 +344,64 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       return
     }
 
-    // 7b. Reconciliation — is this money already in the ledger?
+    // 7b. Does the bank's own reference already name a row here?
+    //
+    // This is the only exact answer available. Everything the fuzzy matcher
+    // works with — amount, time, counterparty — can legitimately coincide
+    // between two separate payments; a bank's transaction id cannot.
+    //
+    // trustedReference is what survives the check below. A reference is only
+    // believed once it has been shown to behave like an identifier, because the
+    // way a reference pattern fails is by latching onto something CONSTANT in
+    // the bank's template — and a constant would be shared by every alert from
+    // that bank, quietly collapsing unrelated payments into one another.
+    let trustedReference = parsedTx.reference
+    if (trustedReference !== undefined) {
+      const sharing = await this.transactionRepo.findByProviderRef(accountId, trustedReference)
+
+      // A genuine reference names one payment, so every row already carrying it
+      // must agree on the amount and direction. One that does not is proof the
+      // value is not an identifier, and it is dropped rather than acted on.
+      const contradicts = sharing.some(
+        (row) => row.amountKobo !== parsedTx.amountKobo.toString() || row.type !== parsedTx.type,
+      )
+      if (contradicts) {
+        this.logger.warn(
+          { messageId, senderDomain: email.senderDomain, reference: trustedReference },
+          'Reference is attached to a different amount; treating it as a template constant, not an identifier',
+        )
+        trustedReference = undefined
+      } else {
+        const same = sharing[0]
+        if (same !== undefined) {
+          // The same payment, identified outright. This catches what the
+          // matching window cannot: a redelivery days later, under a different
+          // message id, still resolves here.
+          if (same.source === 'MANUAL') {
+            await this.supersedePlaceholder(same, {
+              accountId,
+              messageId,
+              normalizedName,
+              parsedTx,
+              isVerified,
+              reference: trustedReference,
+              account,
+              email,
+            })
+            return
+          }
+
+          this.logger.info(
+            { messageId, existingId: same.id, reference: trustedReference },
+            'Bank reference already recorded; not creating a second row',
+          )
+          await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
+          return
+        }
+      }
+    }
+
+    // 7c. Reconciliation — is this money already in the ledger?
     //
     // Replaces a Redis hash over account + amount + a 5-minute time bucket.
     // That hash both missed real duplicates (two seconds either side of a
@@ -316,12 +426,14 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
         merchantName: normalizedName,
         transactionDate: parsedTx.transactionDate,
         source: 'EMAIL',
+        reference: trustedReference,
       },
       candidates.map((row) => ({
         id: row.id,
         merchantName: row.merchantName,
         transactionDate: row.transactionDate,
         source: row.source,
+        reference: row.providerRef ?? undefined,
       })),
     )
 
@@ -335,36 +447,21 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     }
 
     if (verdict.kind === 'supersedes') {
-      // The bank's version of a payment the user typed in themselves. Rewrite
-      // the placeholder in place, keeping its id so their own correction, any
-      // budget alert raised against it, and any screen holding it stay valid.
-      //
-      // The category is deliberately left alone. It is the one field the user
-      // may have chosen deliberately, and there is no way to tell a deliberate
-      // choice from the categoriser's guess after the fact — so re-deriving it
-      // from the bank's merchant string risks silently discarding real input.
-      // A wrong category is one tap to fix, and fixing it teaches the shared
-      // map under the correct merchant name.
       const placeholder = candidates.find((row) => row.id === verdict.candidate.id)
       if (placeholder === undefined) {
         throw new Error(`Reconciliation returned candidate ${verdict.candidate.id} that is not in the candidate set`)
       }
 
-      const superseded = await this.transactionRepo.supersede(placeholder.id, {
-        merchantName: normalizedName,
-        categoryId: placeholder.categoryId,
-        transactionDate: parsedTx.transactionDate,
-        source: 'EMAIL',
-        idempotencyKey: messageId,
+      await this.supersedePlaceholder(placeholder, {
+        accountId,
+        messageId,
+        normalizedName,
+        parsedTx,
         isVerified,
-        balanceAfterKobo: parsedTx.balanceAfterKobo,
+        reference: trustedReference,
+        account,
+        email,
       })
-
-      this.logger.info(
-        { messageId, transactionId: superseded.id, reason: verdict.reason },
-        'Bank alert superseded a manually entered transaction',
-      )
-      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'TRANSACTION_CREATED')
       return
     }
 
@@ -409,6 +506,9 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
         idempotencyKey: messageId, // idempotencyKey = Gmail message ID
         balanceAfterKobo: parsedTx.balanceAfterKobo,
         isVerified,
+        // Only a reference that survived the identifier check is stored, so a
+        // template constant never enters the table and can never be matched on.
+        providerRef: trustedReference,
       })
 
       this.logger.info(

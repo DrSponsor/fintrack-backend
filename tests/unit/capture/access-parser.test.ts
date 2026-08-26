@@ -142,3 +142,40 @@ describe('AccessParser — rejects what it should', () => {
     expect(result).toBeNull()
   })
 })
+
+describe('AccessParser — the bank reference', () => {
+  // The only field in the alert that identifies the payment outright. Amount,
+  // time and counterparty can all coincide between two separate payments.
+
+  it('reads the reference from the summary table', async () => {
+    const result = await parser.parse('Access Bank Transaction Alert', DEBIT, '')
+    expect(result?.reference).toBe('312ABCD2600000AA')
+  })
+
+  it('reads a different reference from a different alert', async () => {
+    // Trivial to state and the entire point: distinct payments carry distinct
+    // references, which is what lets them be told apart with certainty.
+    const result = await parser.parse('Access Bank Transaction Alert', CREDIT, '')
+    expect(result?.reference).toBe('312WXYZ2600000BB')
+  })
+
+  it('drops a reference that is not an identifier', async () => {
+    // If the label were ever missing, the field reader would run on to the next
+    // row and return the date. Storing that would give every alert on a given
+    // day the same "reference", and equal-amount payments would collapse into
+    // one another — so the shape gate has to catch it here.
+    const suspect = alertHtml({
+      direction: 'Debited',
+      amount: '1,234.56',
+      description: 'MOBILE TRF TO PAY/ /MARY OKAFOR ROE',
+      reference: '05-Mar-2026',
+      transactionDate: '05-Mar-2026',
+      balance: '50,000.00',
+    })
+    const result = await parser.parse('Access Bank Transaction Alert', suspect, '')
+    expect(result).not.toBeNull()
+    // The rest of the alert still parses; only the untrustworthy field is lost.
+    expect(result?.reference).toBeUndefined()
+    expect(result?.amountKobo).toBe(123456n)
+  })
+})

@@ -33,6 +33,7 @@ function makeTransactionRecord(overrides: Partial<TransactionRecord> = {}): Tran
     transactionDate: new Date(),
     source: 'MANUAL',
     isVerified: false,
+    providerRef: null,
     createdAt: new Date(),
     ...overrides,
   }
@@ -46,6 +47,7 @@ function createMockTransactionRepo(overrides: Partial<ITransactionRepository> = 
     findMatchCandidates: vi.fn().mockResolvedValue([]),
     supersede: vi.fn().mockResolvedValue(makeTransactionRecord()),
     findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+    findByProviderRef: vi.fn().mockResolvedValue([]),
     deleteManual: vi.fn().mockResolvedValue(undefined),
     // Resolves the count of backfilled rows, not undefined.
     correctCategory: vi.fn().mockResolvedValue(0),

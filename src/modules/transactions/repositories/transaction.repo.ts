@@ -14,6 +14,8 @@ export type TransactionRecord = {
   readonly transactionDate: Date
   readonly source: 'EMAIL' | 'MANUAL' | 'SMS' | 'MONO'
   readonly isVerified: boolean
+  /** The bank's own id for this transaction, when its alert stated one. */
+  readonly providerRef: string | null
   readonly createdAt: Date
 }
 
@@ -28,6 +30,7 @@ export type CreateTransactionData = {
   readonly idempotencyKey: string
   readonly balanceAfterKobo?: bigint | undefined
   readonly isVerified?: boolean
+  readonly providerRef?: string | undefined
 }
 
 export type ListTransactionsFilter = {
@@ -59,6 +62,7 @@ export type SupersedeData = {
   readonly idempotencyKey: string
   readonly isVerified: boolean
   readonly balanceAfterKobo?: bigint | undefined
+  readonly providerRef?: string | undefined
 }
 
 export interface ITransactionRepository {
@@ -86,6 +90,19 @@ export interface ITransactionRepository {
    * creating a second row.
    */
   findByIdempotencyKey(key: string): Promise<TransactionRecord | null>
+  /**
+   * Every transaction on an account already carrying this bank reference.
+   *
+   * Returns a list rather than one row on purpose. A reference is supposed to
+   * identify exactly one payment, so more than one row — or one row with a
+   * different amount — is evidence that the value is not an identifier at all
+   * but something constant lifted out of the bank's template. The caller uses
+   * that to decide whether to trust it. See the ingest worker.
+   *
+   * Scoped by account because a reference is only unique within the bank that
+   * issued it; two banks may well use the same string.
+   */
+  findByProviderRef(accountId: string, reference: string): Promise<readonly TransactionRecord[]>
   /**
    * Removes a transaction the user entered themselves.
    *
@@ -127,6 +144,7 @@ const SELECT_FIELDS = {
   transactionDate: true,
   source: true,
   isVerified: true,
+  providerRef: true,
   createdAt: true,
   account: {
     select: {
@@ -145,6 +163,7 @@ type PrismaTransactionRow = {
   transactionDate: Date
   source: CaptureSource
   isVerified: boolean
+  providerRef: string | null
   createdAt: Date
   account: {
     userId: string
@@ -163,6 +182,7 @@ function toDomain(row: PrismaTransactionRow): TransactionRecord {
     transactionDate: row.transactionDate,
     source: row.source,
     isVerified: row.isVerified,
+    providerRef: row.providerRef,
     createdAt: row.createdAt,
   }
 }
@@ -231,6 +251,7 @@ export class PrismaTransactionRepository implements ITransactionRepository {
           source: data.source,
           idempotencyKey: data.idempotencyKey,
           isVerified: data.isVerified ?? false,
+          providerRef: data.providerRef ?? null,
         },
         select: SELECT_FIELDS,
       }),
@@ -300,6 +321,22 @@ export class PrismaTransactionRepository implements ITransactionRepository {
     await this.prisma.transaction.delete({
       where: { id_transactionDate: { id, transactionDate: existing.transactionDate } },
     })
+  }
+
+  public async findByProviderRef(
+    accountId: string,
+    reference: string,
+  ): Promise<readonly TransactionRecord[]> {
+    const rows = await this.prisma.transaction.findMany({
+      // Served by @@index([accountId, providerRef]). Deliberately unbounded in
+      // time: a reference identifies a payment outright, so a redelivered alert
+      // must be recognised however long it took to arrive — which is precisely
+      // the case the 36-hour matching window cannot see.
+      where: { accountId, providerRef: reference },
+      select: SELECT_FIELDS,
+      take: 10,
+    })
+    return rows.map((row) => toDomain(row))
   }
 
   public async findMatchCandidates(window: MatchWindow): Promise<readonly TransactionRecord[]> {
@@ -401,6 +438,9 @@ export class PrismaTransactionRepository implements ITransactionRepository {
           source: data.source,
           idempotencyKey: data.idempotencyKey,
           isVerified: data.isVerified,
+          // A placeholder carries no reference; the bank's version does, and it
+          // is what lets a redelivery of this same alert be recognised later.
+          ...(data.providerRef !== undefined ? { providerRef: data.providerRef } : {}),
         },
         select: SELECT_FIELDS,
       }),

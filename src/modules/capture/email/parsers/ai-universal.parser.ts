@@ -6,6 +6,7 @@ import { parseAmountKobo, cleanText } from './utils'
 import {
   checkPattern,
   isPlausibleAmountKobo,
+  isPlausibleReference,
   redactForModel,
   runPattern,
   verifyPatternFields,
@@ -131,6 +132,7 @@ export class AIUniversalParser {
       const merchantRegexStr = patterns.merchantRegex || patterns.merchant_name
       const dateRegexStr = patterns.dateRegex || patterns.date
       const balanceRegexStr = patterns.balanceRegex || patterns.balance_kobo
+      const referenceRegexStr = patterns.referenceRegex || patterns.reference
 
       if (!amountRegexStr) return null
 
@@ -204,12 +206,36 @@ export class AIUniversalParser {
         }
       }
 
+      // The bank's own id for this payment, where the pattern set has one. It
+      // is the only field that can later settle whether two alerts describe the
+      // same money by equality rather than judgement — so it is also the field
+      // where a bad capture does the most damage. A pattern that latched onto
+      // something CONSTANT in the template would hand every alert from this
+      // bank the same "reference", and unrelated payments would begin
+      // collapsing into one another.
+      //
+      // isPlausibleReference is the shape half of the defence, applied here so
+      // a stored pattern that predates this check is screened on every use, not
+      // only at generation. The other half is at ingest, where the value is
+      // tested against every row already carrying it.
+      let reference: string | undefined = undefined
+      if (referenceRegexStr) {
+        const referenceCheck = checkPattern(referenceRegexStr)
+        if (referenceCheck.ok) {
+          const referenceRaw = runPattern(referenceCheck.regex, text)
+          if (referenceRaw !== null && isPlausibleReference(referenceRaw)) {
+            reference = referenceRaw.trim()
+          }
+        }
+      }
+
       return {
         amountKobo,
         type,
         merchantName,
         transactionDate,
         balanceAfterKobo,
+        reference,
       }
     } catch (err) {
       this.logger.warn({ err }, 'Error parsing text with patterns')

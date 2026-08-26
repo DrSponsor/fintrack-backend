@@ -74,6 +74,17 @@ export type ReconcileSubject = {
   readonly merchantName: string
   readonly transactionDate: Date
   readonly source: CaptureSourceName
+  /**
+   * The bank's own id for this payment, where its alert stated one.
+   *
+   * Used here in ONE direction only: two records carrying DIFFERENT references
+   * are different payments, full stop, and that ends the comparison. The
+   * reverse — treating equal references as proof of sameness — is deliberately
+   * not decided here, because it depends on facts this class cannot see. It is
+   * settled at ingest, where a reference can be checked against every row
+   * already carrying it. See findByProviderRef.
+   */
+  readonly reference?: string | undefined
 }
 
 export type ReconcileCandidate = ReconcileSubject & {
@@ -248,6 +259,24 @@ export class ReconciliationService {
   private decide(incoming: ReconcileSubject, candidate: ReconcileCandidate): MatchVerdict {
     const gapMs = Math.abs(incoming.transactionDate.getTime() - candidate.transactionDate.getTime())
     if (gapMs > WIDE_WINDOW_MS) {
+      return { kind: 'distinct' }
+    }
+
+    // ── The one place this stops being a judgement call ───────────────────
+    // Two bank records that state DIFFERENT references are different payments.
+    // Nothing below can outweigh that: the amount, the time and the counterparty
+    // may all coincide between two separate payments — ₦500 of airtime twice in
+    // a day is the ordinary case — but the bank's own identifier cannot.
+    //
+    // Only the inequality is trusted here, and only when both sides have one.
+    // That is the safe direction: acting on it can at worst leave two rows the
+    // user can see, whereas trusting equality could suppress a real payment,
+    // and equality deserves the stronger check that ingest applies.
+    if (
+      incoming.reference !== undefined &&
+      candidate.reference !== undefined &&
+      incoming.reference !== candidate.reference
+    ) {
       return { kind: 'distinct' }
     }
 

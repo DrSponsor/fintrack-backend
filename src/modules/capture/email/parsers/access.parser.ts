@@ -1,5 +1,6 @@
 import type { IEmailParser, ParsedTransaction } from './parser.interface'
 import { parseAmountKobo, cleanText } from './utils'
+import { isPlausibleReference } from './pattern-safety'
 
 /**
  * Access Bank email alerts.
@@ -160,6 +161,16 @@ export class AccessParser implements IEmailParser {
     const parsedDate = rawDate !== null ? parseAccessDate(rawDate) : null
     const balance = field(text, 'Available Balance')
 
+    // Access prints its own transaction id in the summary table, and it is the
+    // only field here that can settle whether two alerts describe the same
+    // payment by equality rather than judgement. Run through the same shape
+    // check the generated patterns face: this parser reads by label, so a
+    // mis-capture would have to be the adjacent row, and that row is the date —
+    // exactly what isPlausibleReference rejects.
+    const rawReference = field(text, 'Reference Number')
+    const reference =
+      rawReference !== null && isPlausibleReference(rawReference) ? rawReference.trim() : undefined
+
     return Promise.resolve({
       amountKobo: parseAmountKobo(amountMatch[1]),
       type,
@@ -168,6 +179,7 @@ export class AccessParser implements IEmailParser {
       // misdates a historical transaction, so it must never be silent.
       transactionDate: parsedDate ?? new Date(),
       ...(balance !== null ? { balanceAfterKobo: parseAmountKobo(balance) } : {}),
+      ...(reference !== undefined ? { reference } : {}),
     })
   }
 }

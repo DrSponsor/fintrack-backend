@@ -100,6 +100,11 @@ field stating exactly what that regex captures from THIS email:
   "dateValue"      the exact text dateRegex captures from THIS email
   "balanceRegex"   regex capturing the resulting balance in group 1
   "balanceValue"   the exact text balanceRegex captures from THIS email
+  "referenceRegex" regex capturing the bank's own transaction id in group 1,
+                   usually labelled Reference, Reference Number, Transaction
+                   Reference, Session ID or similar. OMIT BOTH REFERENCE KEYS
+                   if this email does not state one.
+  "referenceValue" the exact text referenceRegex captures from THIS email
 
 Rules:
 - Every regex MUST contain exactly one capturing group, and the value you want must be in group 1.
@@ -108,6 +113,7 @@ Rules:
 - Never capture an account number, a reference number or a phone number as the amount.
 - "typeValue" must be a word that genuinely states direction, such as Debited, Credited, Debit, Credit. A generic word like "Transaction" is not acceptable.
 - "dateValue" must be the COMPLETE date as it appears, including separators. A partial capture such as "05" from "05-Mar-2026" is wrong.
+- "referenceValue" must identify THIS ONE payment. It is used to tell two payments apart, so a value that would be the same on every email from this bank is worse than none. Never return a date, a label, a phone number, an account number or a support line as the reference. If you are not certain the email states a per-transaction id, omit the reference keys entirely.
 - Keep each pattern under 200 characters.
 - Do NOT use nested quantifiers such as (a+)+ or (.*)* — they are rejected.
 - Every Value field must be copied exactly from the email text, with no reformatting.
