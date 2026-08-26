@@ -169,3 +169,25 @@ export const correctCategoryJsonSchema = {
     },
   },
 } as const
+
+export const deleteTransactionJsonSchema = {
+  response: {
+    200: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['success', 'data', 'requestId'],
+      properties: {
+        success: { type: 'boolean', const: true },
+        data: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['message'],
+          properties: {
+            message: { type: 'string' },
+          },
+        },
+        requestId: { type: 'string' },
+      },
+    },
+  },
+} as const

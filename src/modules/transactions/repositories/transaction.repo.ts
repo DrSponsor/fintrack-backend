@@ -38,9 +38,60 @@ export type ListTransactionsFilter = {
   readonly endDate?: Date
 }
 
+/**
+ * The three exact gates a candidate must already satisfy. Applied in SQL so
+ * ReconciliationService only ever scores the fuzzy remainder — see that class
+ * for why amount is an equality test and never a tolerance.
+ */
+export type MatchWindow = {
+  readonly accountId: string
+  readonly amountKobo: bigint
+  readonly type: 'DEBIT' | 'CREDIT'
+  readonly from: Date
+  readonly to: Date
+}
+
+export type SupersedeData = {
+  readonly merchantName: string
+  readonly categoryId: string
+  readonly transactionDate: Date
+  readonly source: 'EMAIL' | 'MANUAL' | 'SMS' | 'MONO'
+  readonly idempotencyKey: string
+  readonly isVerified: boolean
+  readonly balanceAfterKobo?: bigint | undefined
+}
+
 export interface ITransactionRepository {
   create(data: CreateTransactionData): Promise<TransactionRecord>
   findById(id: string): Promise<TransactionRecord | null>
+  /**
+   * Rows that could describe the same money as an incoming transaction.
+   * Exact on account, amount and direction; bounded on time.
+   */
+  findMatchCandidates(window: MatchWindow): Promise<readonly TransactionRecord[]>
+  /**
+   * Replaces a manual placeholder's contents with the bank's authoritative
+   * version, keeping its id.
+   */
+  supersede(id: string, data: SupersedeData): Promise<TransactionRecord>
+  /**
+   * Looks a transaction up by the key its source pipeline made it idempotent
+   * on — a Gmail message id, or the client's Idempotency-Key.
+   *
+   * The unique constraint alone cannot answer this. It spans
+   * (idempotency_key, transaction_date) because the table is partitioned on the
+   * date, so the same key stored against a different date does not collide.
+   * That is exactly what happens after a supersede, which keeps the
+   * placeholder's date, so this lookup is what stops a redelivered alert
+   * creating a second row.
+   */
+  findByIdempotencyKey(key: string): Promise<TransactionRecord | null>
+  /**
+   * Removes a transaction the user entered themselves.
+   *
+   * Restricted to MANUAL rows by design — see DeleteTransactionUseCase.
+   */
+  deleteManual(id: string): Promise<void>
   findByUser(
     userId: string,
     cursor?: string,
@@ -224,6 +275,151 @@ export class PrismaTransactionRepository implements ITransactionRepository {
     }
 
     return toDomain(row)
+  }
+
+  public async findByIdempotencyKey(key: string): Promise<TransactionRecord | null> {
+    const row = await this.prisma.transaction.findFirst({
+      where: { idempotencyKey: key },
+      select: SELECT_FIELDS,
+    })
+    return row === null ? null : toDomain(row)
+  }
+
+  public async deleteManual(id: string): Promise<void> {
+    const existing = await this.prisma.transaction.findFirst({
+      where: { id },
+      select: { transactionDate: true },
+    })
+    if (existing === null) {
+      throw new Error(`Transaction with id ${id} not found`)
+    }
+
+    // The row's own event chain cascades away with it. The durable record of
+    // the deletion is the audit_logs entry the route's audit config writes,
+    // which lives outside this table and survives the row.
+    await this.prisma.transaction.delete({
+      where: { id_transactionDate: { id, transactionDate: existing.transactionDate } },
+    })
+  }
+
+  public async findMatchCandidates(window: MatchWindow): Promise<readonly TransactionRecord[]> {
+    const rows = await this.prisma.transaction.findMany({
+      where: {
+        accountId: window.accountId,
+        // Exact, never a range. A payment one kobo away is a different payment,
+        // and treating it as the same is how a ledger loses money.
+        amountKobo: window.amountKobo,
+        type: window.type,
+        transactionDate: { gte: window.from, lte: window.to },
+      },
+      // Served by @@index([accountId, transactionDate]); the amount and
+      // direction filter a handful of rows at most, so no extra index earns
+      // its keep on the hot write path.
+      select: SELECT_FIELDS,
+      take: 25,
+    })
+    return rows.map((row) => toDomain(row))
+  }
+
+  /**
+   * Rewrites a manual placeholder in place with the bank's version of the same
+   * payment, preserving the row's id so anything already pointing at it — the
+   * user's own category correction, a budget alert, a screen the client has
+   * open — keeps working.
+   *
+   * transactionDate is deliberately NOT updated. The table is a TimescaleDB
+   * hypertable partitioned on that column, so changing it would move the row
+   * between chunks and drag two ON UPDATE CASCADE foreign keys with it. The
+   * bank's exact timestamp is written into the audit event instead, where it is
+   * preserved without putting a partition key in motion.
+   *
+   * The prior values go into the same event, so a supersede that turns out to
+   * have been wrong can be read back and undone.
+   */
+  public async supersede(id: string, data: SupersedeData): Promise<TransactionRecord> {
+    const existing = await this.prisma.transaction.findFirst({
+      where: { id },
+      select: {
+        transactionDate: true,
+        merchantName: true,
+        categoryId: true,
+        source: true,
+        isVerified: true,
+        idempotencyKey: true,
+      },
+    })
+    if (existing === null) {
+      throw new Error(`Transaction with id ${id} not found`)
+    }
+
+    const previousHash = await this.findLastEventHash(id)
+    const eventId = randomUUID()
+    const eventTimestamp = new Date()
+    const eventPayload = {
+      supersededBy: data.source,
+      bankTransactionDate: data.transactionDate.toISOString(),
+      merchantName: data.merchantName,
+      categoryId: data.categoryId,
+      idempotencyKey: data.idempotencyKey,
+      previous: {
+        merchantName: existing.merchantName,
+        categoryId: existing.categoryId,
+        source: existing.source,
+        isVerified: existing.isVerified,
+        idempotencyKey: existing.idempotencyKey,
+      },
+    }
+    const eventHash = sha256Hex(
+      `${eventId}:SUPERSEDED:${JSON.stringify(eventPayload)}:${eventTimestamp.toISOString()}:${previousHash}`,
+    )
+
+    const balanceUpdateOps =
+      data.balanceAfterKobo !== undefined
+        ? [
+            this.prisma.account.updateMany({
+              where: {
+                transactions: { some: { id } },
+                OR: [
+                  { lastTransactionDate: null },
+                  { lastTransactionDate: { lte: data.transactionDate } },
+                ],
+              },
+              data: {
+                balanceKobo: data.balanceAfterKobo,
+                lastTransactionDate: data.transactionDate,
+              },
+            }),
+          ]
+        : []
+
+    const [txRow] = await this.prisma.$transaction([
+      this.prisma.transaction.update({
+        where: { id_transactionDate: { id, transactionDate: existing.transactionDate } },
+        data: {
+          merchantName: data.merchantName,
+          categoryId: data.categoryId,
+          source: data.source,
+          idempotencyKey: data.idempotencyKey,
+          isVerified: data.isVerified,
+        },
+        select: SELECT_FIELDS,
+      }),
+      this.prisma.transactionEvent.create({
+        data: {
+          id: eventId,
+          transactionId: id,
+          transactionDate: existing.transactionDate,
+          type: 'SUPERSEDED',
+          payload: eventPayload,
+          previousHash,
+          hash: eventHash,
+          createdAt: eventTimestamp,
+        },
+      }),
+      ...balanceUpdateOps,
+    ])
+
+    return toDomain(txRow)
   }
 
   public async findByUser(

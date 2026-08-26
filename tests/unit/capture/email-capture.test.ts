@@ -12,6 +12,7 @@ import { FidelityParser } from '../../../src/modules/capture/email/parsers/fidel
 import { DiscoveryService } from '../../../src/modules/capture/email/services/discovery.service'
 import { EmailIngestWorker } from '../../../src/modules/capture/email/workers/email-ingest.worker'
 import { GmailQuotaExhaustedError } from '../../../src/modules/capture/email/services/fetch.service'
+import { ReconciliationService } from '../../../src/modules/transactions/services/reconciliation.service'
 
 vi.mock('bullmq', () => {
   return {
@@ -312,7 +313,7 @@ describe('EmailIngestWorker', () => {
       discoveryService: {} as any,
       normalizer: {} as any,
       categorizer: {} as any,
-      deduplicator: {} as any,
+      reconciliation: new ReconciliationService(),
       logger: mockLogger,
       captureEmailQueue: mockQueue,
     })
@@ -365,7 +366,12 @@ describe('EmailIngestWorker', () => {
             accountLast4: '1234',
           }),
         } as any,
-        transactionRepo: { create: vi.fn().mockResolvedValue({ id: 'tx-1' }) } as any,
+        transactionRepo: {
+          create: vi.fn().mockResolvedValue({ id: 'tx-1' }),
+          findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+          findMatchCandidates: vi.fn().mockResolvedValue([]),
+          supersede: vi.fn().mockResolvedValue({ id: 'tx-1' }),
+        } as any,
         emailAccessLogRepo: mockEmailAccessLogRepo as any,
         oauthService: { getValidAccessToken: vi.fn().mockResolvedValue('fake-access-token') } as any,
         fetchService: { fetchEmailWithBackoff: vi.fn().mockResolvedValue(baseEmail) } as any,
@@ -392,11 +398,7 @@ describe('EmailIngestWorker', () => {
           getMerchantFingerprint: vi.fn().mockReturnValue('fingerprint-1'),
         } as any,
         categorizer: { categorize: vi.fn().mockResolvedValue('category-1') } as any,
-        deduplicator: {
-          getTransactionHash: vi.fn().mockReturnValue('hash-1'),
-          findDuplicate: vi.fn().mockResolvedValue(null),
-          trackTransaction: vi.fn(),
-        } as any,
+        reconciliation: new ReconciliationService(),
         logger: mockLogger,
         captureEmailQueue: { add: vi.fn() } as any,
         ...overrides,
@@ -470,12 +472,16 @@ describe('EmailIngestWorker', () => {
       )
     })
 
-    it('logs DUPLICATE_SUPPRESSED when the deduplicator finds an existing match', async () => {
+    it('logs DUPLICATE_SUPPRESSED when this message has already produced a row', async () => {
+      // Checked explicitly rather than left to the unique constraint, which
+      // spans (idempotency_key, transaction_date) and so cannot see a redelivery
+      // whose row was superseded onto a different date.
       const { deps, mockEmailAccessLogRepo } = makeDeps({
-        deduplicator: {
-          getTransactionHash: vi.fn().mockReturnValue('hash-1'),
-          findDuplicate: vi.fn().mockResolvedValue('existing-tx-id'),
-          trackTransaction: vi.fn(),
+        transactionRepo: {
+          create: vi.fn(),
+          findByIdempotencyKey: vi.fn().mockResolvedValue({ id: 'existing-tx-id' }),
+          findMatchCandidates: vi.fn().mockResolvedValue([]),
+          supersede: vi.fn(),
         },
       })
       const worker = new EmailIngestWorker(deps)
@@ -485,12 +491,81 @@ describe('EmailIngestWorker', () => {
       expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ outcome: 'DUPLICATE_SUPPRESSED' }),
       )
+      expect(deps.transactionRepo.create).not.toHaveBeenCalled()
+    })
+
+    it('logs DUPLICATE_SUPPRESSED when the money is already in the ledger', async () => {
+      const { deps, mockEmailAccessLogRepo } = makeDeps({
+        transactionRepo: {
+          create: vi.fn(),
+          findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+          findMatchCandidates: vi.fn().mockResolvedValue([
+            {
+              id: 'existing-tx-id',
+              merchantName: 'POS Purchase',
+              transactionDate: new Date(),
+              source: 'EMAIL',
+              categoryId: 'category-1',
+            },
+          ]),
+          supersede: vi.fn(),
+        },
+      })
+      const worker = new EmailIngestWorker(deps)
+
+      await (worker as any).processJob(mockJob)
+
+      expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'DUPLICATE_SUPPRESSED' }),
+      )
+      expect(deps.transactionRepo.create).not.toHaveBeenCalled()
+    })
+
+    it('supersedes a manual placeholder instead of creating a second row', async () => {
+      // The whole point of the manual-entry conflict work: the user typed the
+      // payment in themselves, and the bank's version now replaces it in place
+      // rather than sitting beside it.
+      const { deps } = makeDeps({
+        transactionRepo: {
+          create: vi.fn(),
+          findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+          findMatchCandidates: vi.fn().mockResolvedValue([
+            {
+              id: 'placeholder-id',
+              merchantName: 'Fuel',
+              transactionDate: new Date(),
+              source: 'MANUAL',
+              categoryId: 'user-chosen-category',
+            },
+          ]),
+          supersede: vi.fn().mockResolvedValue({ id: 'placeholder-id' }),
+        },
+      })
+      const worker = new EmailIngestWorker(deps)
+
+      await (worker as any).processJob(mockJob)
+
+      expect(deps.transactionRepo.create).not.toHaveBeenCalled()
+      expect(deps.transactionRepo.supersede).toHaveBeenCalledWith(
+        'placeholder-id',
+        expect.objectContaining({
+          source: 'EMAIL',
+          idempotencyKey: 'gmail-msg-1',
+          // The category is the one field the user may have set deliberately,
+          // and a deliberate choice is indistinguishable from the categoriser's
+          // guess after the fact — so it is carried over, not re-derived.
+          categoryId: 'user-chosen-category',
+        }),
+      )
     })
 
     it('logs DUPLICATE_SUPPRESSED when a concurrent write hits the DB unique constraint', async () => {
       const { deps, mockEmailAccessLogRepo } = makeDeps({
         transactionRepo: {
           create: vi.fn().mockRejectedValue({ code: 'P2002' }),
+          findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+          findMatchCandidates: vi.fn().mockResolvedValue([]),
+          supersede: vi.fn(),
         },
       })
       const worker = new EmailIngestWorker(deps)

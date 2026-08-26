@@ -64,6 +64,49 @@ export class GetTransactionUseCase {
   }
 }
 
+export class DeleteTransactionUseCase {
+  private readonly transactionRepo: ITransactionRepository
+  private readonly logger: AppLogger
+
+  public constructor(deps: Pick<Required<TransactionUseCasesDeps>, 'transactionRepo' | 'logger'>) {
+    this.transactionRepo = deps.transactionRepo
+    this.logger = deps.logger
+  }
+
+  /**
+   * Removes a transaction the user typed in themselves.
+   *
+   * Deliberately limited to MANUAL rows. A manual entry is the user's own
+   * claim about their money, so retracting it is theirs to do — a mistyped
+   * amount would otherwise sit in the ledger forever. A bank-sourced row is a
+   * record of something that actually happened, and letting anyone delete those
+   * turns a ledger into a notepad: totals would stop reconciling with the bank,
+   * and the deletion would look identical to the transaction never existing.
+   *
+   * This is also what makes the ingest worker's choice honest. When two bank
+   * records are too similar to call, it creates both rather than suppressing
+   * one, on the grounds that a visible extra row is a problem the user can see
+   * and fix — which is only true if something like this exists.
+   */
+  public async execute(userId: string, transactionId: string): Promise<void> {
+    const transaction = await this.transactionRepo.findById(transactionId)
+    // Security Layer: 404 rather than 403 on an ownership mismatch, so the
+    // response cannot be used to discover that an id exists.
+    if (transaction === null || transaction.userId !== userId) {
+      throw notFound('Transaction not found')
+    }
+
+    if (transaction.source !== 'MANUAL') {
+      throw validationError(
+        'Only transactions you entered yourself can be deleted. This one came from your bank.',
+      )
+    }
+
+    await this.transactionRepo.deleteManual(transactionId)
+    this.logger.info({ userId, transactionId }, 'manual transaction deleted')
+  }
+}
+
 export class CorrectCategoryUseCase {
   private readonly transactionRepo: ITransactionRepository
   private readonly categoryRepo: ICategoryRepository

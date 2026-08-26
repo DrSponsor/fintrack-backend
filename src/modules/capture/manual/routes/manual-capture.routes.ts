@@ -2,9 +2,10 @@ import type { AppFastifyInstance } from '../../../../types/fastify'
 import { ManualCaptureUseCase } from '../services/manual-capture.use-case'
 import { PrismaTransactionRepository } from '../../../transactions/repositories/transaction.repo'
 import { PrismaAccountRepository } from '../../../accounts/repositories/account.repo'
+import { PrismaCategoryRepository } from '../../../categories/repositories/category.repo'
 import { NormalizerService } from '../../../transactions/services/normalizer.service'
 import { CategorizerService } from '../../../transactions/services/categorizer.service'
-import { DeduplicatorService } from '../../../transactions/services/deduplicator.service'
+import { ReconciliationService } from '../../../transactions/services/reconciliation.service'
 import { PrismaCategorizationRepository } from '../../../transactions/repositories/categorization.repo'
 import { createAIProvider } from '../../../../core/ai/create-provider'
 import { authenticate, requireUser } from '../../../../core/middleware/authenticate'
@@ -17,6 +18,7 @@ export function registerManualCaptureRoutes(
 ): void {
   const transactionRepo = new PrismaTransactionRepository(fastify.db.primary)
   const accountRepo = new PrismaAccountRepository(fastify.db.primary)
+  const categoryRepo = new PrismaCategoryRepository(fastify.db.primary)
   const mappingRepo = new PrismaCategorizationRepository(fastify.db.primary)
   const normalizer = new NormalizerService()
 
@@ -29,16 +31,15 @@ export function registerManualCaptureRoutes(
     logger: fastify.log,
   })
 
-  const deduplicator = new DeduplicatorService({
-    redis: fastify.redis,
-  })
+  const reconciliation = new ReconciliationService({ logger: fastify.log })
 
   const manualCaptureUseCase = new ManualCaptureUseCase({
     transactionRepo,
     accountRepo,
+    categoryRepo,
     normalizer,
     categorizer,
-    deduplicator,
+    reconciliation,
     logger: fastify.log,
   })
 
@@ -57,14 +58,20 @@ export function registerManualCaptureRoutes(
         throw new Error('manual capture route reached without idempotency preHandler running')
       }
 
-      const transaction = await manualCaptureUseCase.execute(
+      const result = await manualCaptureUseCase.execute(
         requireUser(request).sub,
         requireUser(request).tier,
         request.body,
         request.idempotency.key,
       )
 
-      return reply.code(201).send(successEnvelope(transaction, request.requestId))
+      // 201 only when a row was created. Note that the idempotency plugin
+      // caches whatever goes out here against the Idempotency-Key, so a client
+      // re-sending with force must mint a NEW key — replaying the old one
+      // replays this same "duplicate suspected" answer instead of recording
+      // anything.
+      const status = result.outcome === 'recorded' ? 201 : 200
+      return reply.code(status).send(successEnvelope(result, request.requestId))
     },
   )
 }

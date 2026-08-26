@@ -14,7 +14,7 @@ import { AIUniversalParser } from './email/parsers/ai-universal.parser'
 import { DiscoveryService } from './email/services/discovery.service'
 import { NormalizerService } from '../transactions/services/normalizer.service'
 import { CategorizerService } from '../transactions/services/categorizer.service'
-import { DeduplicatorService } from '../transactions/services/deduplicator.service'
+import { ReconciliationService } from '../transactions/services/reconciliation.service'
 import { EmailIngestWorker } from './email/workers/email-ingest.worker'
 import { WatchRenewalWorker } from './email/workers/watch-renewal.worker'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
@@ -93,9 +93,7 @@ const captureModule: AppFastifyPluginAsync = async (fastify) => {
     redis: fastify.redis,
     logger,
   })
-  const deduplicator = new DeduplicatorService({
-    redis: fastify.redis,
-  })
+  const reconciliation = new ReconciliationService({ logger })
 
   // 4. Instantiate and run workers (skipped in tests to avoid Redis connection attempts)
   if (fastify.appConfig.nodeEnv !== 'test' && fastify.runWorkers) {
@@ -114,7 +112,7 @@ const captureModule: AppFastifyPluginAsync = async (fastify) => {
       discoveryService,
       normalizer,
       categorizer,
-      deduplicator,
+      reconciliation,
       logger,
       captureEmailQueue: fastify.queues.captureEmail,
     })

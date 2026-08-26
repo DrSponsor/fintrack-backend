@@ -3,6 +3,7 @@ import {
   ListTransactionsUseCase,
   GetTransactionUseCase,
   CorrectCategoryUseCase,
+  DeleteTransactionUseCase,
 } from '../../../src/modules/transactions/use-cases/transaction.use-cases'
 import type { ITransactionRepository, TransactionRecord } from '../../../src/modules/transactions/repositories/transaction.repo'
 import type { ICategoryRepository } from '../../../src/modules/categories/repositories/category.repo'
@@ -42,6 +43,10 @@ function createMockTransactionRepo(overrides: Partial<ITransactionRepository> = 
     create: vi.fn().mockResolvedValue(makeTransactionRecord()),
     findById: vi.fn().mockResolvedValue(makeTransactionRecord()),
     findByUser: vi.fn().mockResolvedValue({ data: [], hasMore: false }),
+    findMatchCandidates: vi.fn().mockResolvedValue([]),
+    supersede: vi.fn().mockResolvedValue(makeTransactionRecord()),
+    findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+    deleteManual: vi.fn().mockResolvedValue(undefined),
     // Resolves the count of backfilled rows, not undefined.
     correctCategory: vi.fn().mockResolvedValue(0),
     ...overrides,
@@ -259,5 +264,45 @@ describe('CorrectCategoryUseCase', () => {
     await expect(useCase.execute('user-1', tx.id, { categoryId }))
       .rejects
       .toThrow(AppError)
+  })
+})
+
+describe('DeleteTransactionUseCase', () => {
+  it('removes a transaction the user entered themselves', async () => {
+    const tx = makeTransactionRecord({ userId: 'user-1', source: 'MANUAL' })
+    const transactionRepo = createMockTransactionRepo({
+      findById: vi.fn().mockResolvedValue(tx),
+    })
+
+    await new DeleteTransactionUseCase({ transactionRepo, logger: silentLogger }).execute('user-1', tx.id)
+
+    expect(transactionRepo.deleteManual).toHaveBeenCalledWith(tx.id)
+  })
+
+  it('refuses to delete a transaction that came from the bank', async () => {
+    // A bank-sourced row records something that actually happened. Deleting one
+    // would stop totals reconciling with the bank, and would be
+    // indistinguishable afterwards from the payment never existing.
+    const tx = makeTransactionRecord({ userId: 'user-1', source: 'EMAIL' })
+    const transactionRepo = createMockTransactionRepo({
+      findById: vi.fn().mockResolvedValue(tx),
+    })
+
+    await expect(
+      new DeleteTransactionUseCase({ transactionRepo, logger: silentLogger }).execute('user-1', tx.id),
+    ).rejects.toThrow(AppError)
+    expect(transactionRepo.deleteManual).not.toHaveBeenCalled()
+  })
+
+  it('does not reveal that another user\u2019s transaction exists', async () => {
+    const tx = makeTransactionRecord({ userId: 'someone-else', source: 'MANUAL' })
+    const transactionRepo = createMockTransactionRepo({
+      findById: vi.fn().mockResolvedValue(tx),
+    })
+
+    await expect(
+      new DeleteTransactionUseCase({ transactionRepo, logger: silentLogger }).execute('user-1', tx.id),
+    ).rejects.toThrow(AppError)
+    expect(transactionRepo.deleteManual).not.toHaveBeenCalled()
   })
 })

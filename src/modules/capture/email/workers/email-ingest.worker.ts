@@ -15,7 +15,7 @@ import type { ParsedTransaction } from '../parsers/parser.interface'
 import type { DiscoveryService } from '../services/discovery.service'
 import type { NormalizerService } from '../../../transactions/services/normalizer.service'
 import type { CategorizerService } from '../../../transactions/services/categorizer.service'
-import type { DeduplicatorService } from '../../../transactions/services/deduplicator.service'
+import { ReconciliationService } from '../../../transactions/services/reconciliation.service'
 import type { AppLogger } from '../../../../core/logger'
 import { jobId } from '../../../../core/queue/job-id'
 
@@ -38,7 +38,7 @@ export type EmailIngestWorkerDeps = {
   readonly discoveryService: DiscoveryService
   readonly normalizer: NormalizerService
   readonly categorizer: CategorizerService
-  readonly deduplicator: DeduplicatorService
+  readonly reconciliation: ReconciliationService
   readonly logger: AppLogger
   readonly captureEmailQueue: Queue
 }
@@ -56,7 +56,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
   private readonly discoveryService: DiscoveryService
   private readonly normalizer: NormalizerService
   private readonly categorizer: CategorizerService
-  private readonly deduplicator: DeduplicatorService
+  private readonly reconciliation: ReconciliationService
   private readonly logger: AppLogger
   private readonly captureEmailQueue: Queue
 
@@ -81,7 +81,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     this.discoveryService = deps.discoveryService
     this.normalizer = deps.normalizer
     this.categorizer = deps.categorizer
-    this.deduplicator = deps.deduplicator
+    this.reconciliation = deps.reconciliation
     this.logger = deps.logger
     this.captureEmailQueue = deps.captureEmailQueue
   }
@@ -277,17 +277,106 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     const normalizedName = this.normalizer.normalizeMerchantName(parsedTx.merchantName)
     const fingerprint = this.normalizer.getMerchantFingerprint(normalizedName)
 
-    // 7. Deduplication
-    const hash = this.deduplicator.getTransactionHash(
-      account.accountLast4,
-      parsedTx.amountKobo,
-      parsedTx.transactionDate,
-    )
-    const duplicateId = await this.deduplicator.findDuplicate(hash)
-    if (duplicateId !== null) {
-      this.logger.info({ messageId, duplicateId, hash }, 'Duplicate transaction detected in deduplicator and suppressed')
+    // 7a. Has this exact message already produced a row?
+    //
+    // Checked explicitly rather than left to the unique constraint, because
+    // that constraint spans (idempotency_key, transaction_date) — the table is
+    // partitioned on the date — and a superseded row keeps the placeholder's
+    // date rather than the bank's. A redelivered alert would therefore miss the
+    // constraint and write a second row. This lookup is what closes that.
+    const alreadyIngested = await this.transactionRepo.findByIdempotencyKey(messageId)
+    if (alreadyIngested !== null) {
+      this.logger.info({ messageId, transactionId: alreadyIngested.id }, 'Message already ingested; skipping')
       await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
       return
+    }
+
+    // 7b. Reconciliation — is this money already in the ledger?
+    //
+    // Replaces a Redis hash over account + amount + a 5-minute time bucket.
+    // That hash both missed real duplicates (two seconds either side of a
+    // bucket boundary hashed differently) and, because the merchant was not in
+    // it at all, silently deleted genuinely separate payments that shared an
+    // amount. See ReconciliationService for the full account.
+    //
+    // This is a Postgres lookup rather than a cache read on purpose: the window
+    // is a day and a half, far longer than the old six-hour TTL, and a flushed
+    // cache must never be able to quietly switch deduplication off.
+    const window = ReconciliationService.windowMs
+    const candidates = await this.transactionRepo.findMatchCandidates({
+      accountId,
+      amountKobo: parsedTx.amountKobo,
+      type: parsedTx.type,
+      from: new Date(parsedTx.transactionDate.getTime() - window),
+      to: new Date(parsedTx.transactionDate.getTime() + window),
+    })
+
+    const verdict = this.reconciliation.reconcile(
+      {
+        merchantName: normalizedName,
+        transactionDate: parsedTx.transactionDate,
+        source: 'EMAIL',
+      },
+      candidates.map((row) => ({
+        id: row.id,
+        merchantName: row.merchantName,
+        transactionDate: row.transactionDate,
+        source: row.source,
+      })),
+    )
+
+    if (verdict.kind === 'already-recorded') {
+      this.logger.info(
+        { messageId, existingId: verdict.candidate.id, reason: verdict.reason },
+        'Transaction already in the ledger; not creating a second row',
+      )
+      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
+      return
+    }
+
+    if (verdict.kind === 'supersedes') {
+      // The bank's version of a payment the user typed in themselves. Rewrite
+      // the placeholder in place, keeping its id so their own correction, any
+      // budget alert raised against it, and any screen holding it stay valid.
+      //
+      // The category is deliberately left alone. It is the one field the user
+      // may have chosen deliberately, and there is no way to tell a deliberate
+      // choice from the categoriser's guess after the fact — so re-deriving it
+      // from the bank's merchant string risks silently discarding real input.
+      // A wrong category is one tap to fix, and fixing it teaches the shared
+      // map under the correct merchant name.
+      const placeholder = candidates.find((row) => row.id === verdict.candidate.id)
+      if (placeholder === undefined) {
+        throw new Error(`Reconciliation returned candidate ${verdict.candidate.id} that is not in the candidate set`)
+      }
+
+      const superseded = await this.transactionRepo.supersede(placeholder.id, {
+        merchantName: normalizedName,
+        categoryId: placeholder.categoryId,
+        transactionDate: parsedTx.transactionDate,
+        source: 'EMAIL',
+        idempotencyKey: messageId,
+        isVerified,
+        balanceAfterKobo: parsedTx.balanceAfterKobo,
+      })
+
+      this.logger.info(
+        { messageId, transactionId: superseded.id, reason: verdict.reason },
+        'Bank alert superseded a manually entered transaction',
+      )
+      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'TRANSACTION_CREATED')
+      return
+    }
+
+    if (verdict.kind === 'uncertain') {
+      // Two bank records with an identical amount that are not clearly the same
+      // event. Recorded rather than suppressed: an extra visible row is a
+      // problem the user can see and fix, whereas a swallowed payment is
+      // invisible and unrecoverable.
+      this.logger.warn(
+        { messageId, existingId: verdict.candidate.id, reason: verdict.reason },
+        'Possible duplicate recorded rather than suppressed; a missing transaction is worse than a visible extra one',
+      )
     }
 
     // Load user tier to compute category
@@ -321,9 +410,6 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
         balanceAfterKobo: parsedTx.balanceAfterKobo,
         isVerified,
       })
-
-      // 10. Track in deduplication cache
-      await this.deduplicator.trackTransaction(hash, transaction.id)
 
       this.logger.info(
         { messageId, transactionId: transaction.id, senderDomain: email.senderDomain },

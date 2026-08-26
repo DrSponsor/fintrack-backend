@@ -3,6 +3,7 @@ import {
   ListTransactionsUseCase,
   GetTransactionUseCase,
   CorrectCategoryUseCase,
+  DeleteTransactionUseCase,
 } from '../use-cases/transaction.use-cases'
 import { PrismaTransactionRepository } from '../repositories/transaction.repo'
 import { PrismaCategoryRepository } from '../../categories/repositories/category.repo'
@@ -15,6 +16,7 @@ import {
   listTransactionsJsonSchema,
   getTransactionJsonSchema,
   correctCategoryJsonSchema,
+  deleteTransactionJsonSchema,
 } from '../schemas/transaction.schemas'
 
 export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
@@ -24,6 +26,7 @@ export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
 
   const listTransactionsUseCase = new ListTransactionsUseCase({ transactionRepo })
   const getTransactionUseCase = new GetTransactionUseCase({ transactionRepo })
+  const deleteTransactionUseCase = new DeleteTransactionUseCase({ transactionRepo, logger: fastify.log })
   const consensus = new MerchantConsensusService({
     repo: new PrismaCategorizationRepository(fastify.db.primary),
     logger: fastify.log,
@@ -76,6 +79,31 @@ export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
       const transaction = await getTransactionUseCase.execute(userId, id)
 
       return reply.code(200).send(successEnvelope(transaction, request.requestId))
+    },
+  )
+
+  // ── DELETE /v1/transactions/:id ───────────────────────────────────
+  // Only removes transactions the user entered themselves; see
+  // DeleteTransactionUseCase for why bank-sourced rows are immutable.
+  fastify.delete(
+    '/v1/transactions/:id',
+    {
+      schema: deleteTransactionJsonSchema,
+      preHandler: [authenticate],
+      config: {
+        // The row's own event chain cascades away with it, so this audit entry
+        // is the surviving record that the deletion happened.
+        audit: { action: 'delete_transaction', resourceType: 'transaction' },
+      },
+    },
+    async (request, reply) => {
+      const userId = requireUser(request).sub
+      const { id } = request.params as { id: string }
+      await deleteTransactionUseCase.execute(userId, id)
+
+      return reply
+        .code(200)
+        .send(successEnvelope({ message: 'Transaction deleted' }, request.requestId))
     },
   )
 
