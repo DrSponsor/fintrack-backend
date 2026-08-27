@@ -76,6 +76,9 @@ const transactionObject = {
     transactionDate: { type: 'string', format: 'date-time' },
     source: { type: 'string', enum: ['EMAIL', 'MANUAL', 'SMS', 'MONO'] },
     isVerified: { type: 'boolean' },
+    // The bank's own id for this payment. Null on anything entered by hand,
+    // and on banks whose alerts do not state one.
+    providerRef: { type: 'string', nullable: true },
     createdAt: { type: 'string', format: 'date-time' },
   },
 } as const
