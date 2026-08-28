@@ -1,10 +1,11 @@
 const categoryObject = {
   type: 'object',
   additionalProperties: false,
-  required: ['id', 'name', 'icon'],
+  required: ['id', 'name', 'displayName', 'icon'],
   properties: {
     id: { type: 'string', format: 'uuid' },
     name: { type: 'string' },
+    displayName: { type: 'string' },
     icon: { type: 'string' },
   },
 } as const

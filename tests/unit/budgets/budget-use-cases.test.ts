@@ -52,7 +52,7 @@ describe('Budgets Use Cases', () => {
     })
 
     it('throws 409 conflict when duplicate budget already exists', async () => {
-      const category: CategoryRecord = { id: 'cat-1', name: 'Food', icon: 'food' }
+      const category: CategoryRecord = { id: 'cat-1', name: 'Food', displayName: 'Food', icon: 'food' }
       const categoryRepo = createMockCategoryRepo(category)
       const budget: BudgetRecord = {
         id: 'b-1',
@@ -77,7 +77,7 @@ describe('Budgets Use Cases', () => {
     })
 
     it('throws 402 subscriptionRequired when FREE tier user exceeds 3 budgets', async () => {
-      const category: CategoryRecord = { id: 'cat-4', name: 'Utilities', icon: 'zap' }
+      const category: CategoryRecord = { id: 'cat-4', name: 'Utilities', displayName: 'Utilities', icon: 'zap' }
       const categoryRepo = createMockCategoryRepo(category)
       const mockBudgets: readonly BudgetRecord[] = [
         { id: 'b-1', userId: 'user-1', categoryId: 'cat-1', limitKobo: '1000', periodType: 'MONTHLY', createdAt: new Date() },
@@ -99,7 +99,7 @@ describe('Budgets Use Cases', () => {
     })
 
     it('allows > 3 budgets when user is PRO tier', async () => {
-      const category: CategoryRecord = { id: 'cat-4', name: 'Utilities', icon: 'zap' }
+      const category: CategoryRecord = { id: 'cat-4', name: 'Utilities', displayName: 'Utilities', icon: 'zap' }
       const categoryRepo = createMockCategoryRepo(category)
       const mockBudgets: readonly BudgetRecord[] = [
         { id: 'b-1', userId: 'user-1', categoryId: 'cat-1', limitKobo: '1000', periodType: 'MONTHLY', createdAt: new Date() },

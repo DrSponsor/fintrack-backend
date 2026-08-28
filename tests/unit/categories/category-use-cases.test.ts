@@ -13,8 +13,8 @@ function createMockCategoryRepo(categories: readonly CategoryRecord[] = []): ICa
 describe('ListCategoriesUseCase', () => {
   it('returns all categories from the repository', async () => {
     const categories: readonly CategoryRecord[] = [
-      { id: '1', name: 'food-groceries', icon: 'utensils' },
-      { id: '2', name: 'transport', icon: 'bus' },
+      { id: '1', name: 'food-groceries', displayName: 'Food & groceries', icon: 'utensils' },
+      { id: '2', name: 'transport', displayName: 'Transport', icon: 'bus' },
     ]
     const categoryRepo = createMockCategoryRepo(categories)
     const useCase = new ListCategoriesUseCase({ categoryRepo })

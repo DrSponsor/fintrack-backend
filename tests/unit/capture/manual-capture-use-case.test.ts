@@ -153,7 +153,10 @@ describe('ManualCaptureUseCase', () => {
     expect(categorizer.categorize).toHaveBeenCalledWith(
       'user-1',
       'FREE',
-      'Opay/shoprite',
+      // Capitalisation the user typed is kept. The previous normaliser
+      // lowercased the whole string before title-casing each space-separated
+      // token, so the S in Shoprite was destroyed and never came back.
+      'Opay/Shoprite',
       10000n,
       'opayshoprite',
       // The user's stated direction reaches the categoriser rather than being
@@ -164,7 +167,7 @@ describe('ManualCaptureUseCase', () => {
       accountId: account.id,
       amountKobo: 10000n,
       type: 'DEBIT',
-      merchantName: 'Opay/shoprite',
+      merchantName: 'Opay/Shoprite',
       categoryId: 'food-groceries-id',
       transactionDate: expect.any(Date),
       source: 'MANUAL',

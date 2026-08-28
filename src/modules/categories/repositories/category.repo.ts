@@ -2,7 +2,10 @@ import type { PrismaClient } from '../../../generated/prisma/client'
 
 export type CategoryRecord = {
   readonly id: string
+  /** Stable slug — 'food-groceries'. Used for lookups, never shown. */
   readonly name: string
+  /** What a person reads — 'Food & groceries'. */
+  readonly displayName: string
   readonly icon: string
 }
 
@@ -23,7 +26,7 @@ export class PrismaCategoryRepository implements ICategoryRepository {
 
   public async findAll(): Promise<readonly CategoryRecord[]> {
     return this.prisma.category.findMany({
-      select: { id: true, name: true, icon: true },
+      select: { id: true, name: true, displayName: true, icon: true },
       orderBy: { name: 'asc' },
     })
   }
@@ -31,14 +34,14 @@ export class PrismaCategoryRepository implements ICategoryRepository {
   public async findById(id: string): Promise<CategoryRecord | null> {
     return this.prisma.category.findUnique({
       where: { id },
-      select: { id: true, name: true, icon: true },
+      select: { id: true, name: true, displayName: true, icon: true },
     })
   }
 
   public async findByName(name: string): Promise<CategoryRecord | null> {
     return this.prisma.category.findUnique({
       where: { name },
-      select: { id: true, name: true, icon: true },
+      select: { id: true, name: true, displayName: true, icon: true },
     })
   }
 }

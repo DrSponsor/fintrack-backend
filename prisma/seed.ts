@@ -11,23 +11,28 @@ const pool = new Pool({ connectionString })
 const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
+// `name` is the slug every lookup uses and is never shown to anyone.
+// `displayName` is what appears on a ledger row. Keeping both here means
+// adding a category is one edit, and no client has to know how to turn
+// "food-groceries" into something a person would say — which is how "Airtime
+// & data" ended up on screen as "airtime-data".
 const categories = [
-  { name: 'uncategorised', icon: 'circle-help' },
-  { name: 'food-groceries', icon: 'utensils' },
-  { name: 'transport', icon: 'bus' },
-  { name: 'airtime-data', icon: 'smartphone' },
-  { name: 'utilities', icon: 'lightbulb' },
-  { name: 'entertainment', icon: 'ticket' },
-  { name: 'health', icon: 'heart-pulse' },
-  { name: 'education', icon: 'graduation-cap' },
-  { name: 'shopping', icon: 'shopping-bag' },
-  { name: 'transfers', icon: 'arrow-left-right' },
-  { name: 'subscriptions', icon: 'calendar-repeat' },
-  { name: 'rent', icon: 'home' },
-  { name: 'salary', icon: 'briefcase-business' },
-  { name: 'fees-charges', icon: 'receipt' },
-  { name: 'investments', icon: 'trending-up' },
-  { name: 'business', icon: 'store' },
+  { name: 'uncategorised', displayName: 'Uncategorised', icon: 'circle-help' },
+  { name: 'food-groceries', displayName: 'Food & groceries', icon: 'utensils' },
+  { name: 'transport', displayName: 'Transport', icon: 'bus' },
+  { name: 'airtime-data', displayName: 'Airtime & data', icon: 'smartphone' },
+  { name: 'utilities', displayName: 'Utilities', icon: 'lightbulb' },
+  { name: 'entertainment', displayName: 'Entertainment', icon: 'ticket' },
+  { name: 'health', displayName: 'Health', icon: 'heart-pulse' },
+  { name: 'education', displayName: 'Education', icon: 'graduation-cap' },
+  { name: 'shopping', displayName: 'Shopping', icon: 'shopping-bag' },
+  { name: 'transfers', displayName: 'Transfers', icon: 'arrow-left-right' },
+  { name: 'subscriptions', displayName: 'Subscriptions', icon: 'calendar-repeat' },
+  { name: 'rent', displayName: 'Rent', icon: 'home' },
+  { name: 'salary', displayName: 'Salary', icon: 'briefcase-business' },
+  { name: 'fees-charges', displayName: 'Fees & charges', icon: 'receipt' },
+  { name: 'investments', displayName: 'Investments', icon: 'trending-up' },
+  { name: 'business', displayName: 'Business', icon: 'store' },
 ] as const
 
 const keywords: Record<string, readonly string[]> = {
@@ -67,7 +72,7 @@ async function seed(): Promise<void> {
     const record = await prisma.category.upsert({
       where: { name: category.name },
       create: category,
-      update: { icon: category.icon },
+      update: { icon: category.icon, displayName: category.displayName },
       select: { id: true },
     })
     categoryRecords.set(category.name, record)

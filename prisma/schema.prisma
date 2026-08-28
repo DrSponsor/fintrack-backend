@@ -119,7 +119,12 @@ model BudgetAlert {
 
 model Category {
   id           String   @id @default(uuid()) @db.Uuid
+  /// Stable slug. Used for lookups and never shown to a person.
   name         String   @unique
+  /// What a person reads. Lives here rather than in each client so adding a
+  /// category is one change, and so two clients cannot disagree about what a
+  /// category is called.
+  displayName  String   @map("display_name")
   icon         String
   createdAt    DateTime @default(now()) @map("created_at")
 
