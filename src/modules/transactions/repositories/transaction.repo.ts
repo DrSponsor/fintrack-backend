@@ -16,6 +16,9 @@ export type TransactionRecord = {
   readonly isVerified: boolean
   /** The bank's own id for this transaction, when its alert stated one. */
   readonly providerRef: string | null
+  /** Set when this row is one half of money moved between the user's own
+   *  accounts. Aggregates must skip it — see TransferMatcherService. */
+  readonly transferGroupId: string | null
   readonly createdAt: Date
 }
 
@@ -145,6 +148,7 @@ const SELECT_FIELDS = {
   source: true,
   isVerified: true,
   providerRef: true,
+  transferGroupId: true,
   createdAt: true,
   account: {
     select: {
@@ -164,6 +168,7 @@ type PrismaTransactionRow = {
   source: CaptureSource
   isVerified: boolean
   providerRef: string | null
+  transferGroupId: string | null
   createdAt: Date
   account: {
     userId: string
@@ -183,6 +188,7 @@ function toDomain(row: PrismaTransactionRow): TransactionRecord {
     source: row.source,
     isVerified: row.isVerified,
     providerRef: row.providerRef,
+    transferGroupId: row.transferGroupId,
     createdAt: row.createdAt,
   }
 }

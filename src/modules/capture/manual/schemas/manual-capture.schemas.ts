@@ -99,6 +99,7 @@ const transactionObject = {
     // The bank's own id for this payment. Null on anything entered by hand,
     // and on banks whose alerts do not state one.
     providerRef: { type: 'string', nullable: true },
+    transferGroupId: { type: 'string', nullable: true },
     createdAt: { type: 'string', format: 'date-time' },
   },
 } as const

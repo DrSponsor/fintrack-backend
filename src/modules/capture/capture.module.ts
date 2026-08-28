@@ -19,6 +19,8 @@ import { EmailIngestWorker } from './email/workers/email-ingest.worker'
 import { WatchRenewalWorker } from './email/workers/watch-renewal.worker'
 import { createBullMqConnectionOptions } from '../../core/queue/client'
 import { WatchService } from './email/services/watch.service'
+import { TransferMatcherService } from '../transactions/services/transfer-matcher.service'
+import { PrismaTransferRepository } from '../transactions/repositories/transfer.repo'
 
 // Concrete Bank Parsers
 import { GtbParser } from './email/parsers/gtb.parser'
@@ -94,6 +96,10 @@ const captureModule: AppFastifyPluginAsync = async (fastify) => {
     logger,
   })
   const reconciliation = new ReconciliationService({ logger })
+  const transferMatcher = new TransferMatcherService({
+    repo: new PrismaTransferRepository(fastify.db.primary),
+    logger,
+  })
 
   // 4. Instantiate and run workers (skipped in tests to avoid Redis connection attempts)
   if (fastify.appConfig.nodeEnv !== 'test' && fastify.runWorkers) {
@@ -113,6 +119,7 @@ const captureModule: AppFastifyPluginAsync = async (fastify) => {
       normalizer,
       categorizer,
       reconciliation,
+      transferMatcher,
       logger,
       captureEmailQueue: fastify.queues.captureEmail,
     })

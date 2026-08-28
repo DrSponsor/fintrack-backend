@@ -16,6 +16,7 @@ import type { DiscoveryService } from '../services/discovery.service'
 import type { NormalizerService } from '../../../transactions/services/normalizer.service'
 import type { CategorizerService } from '../../../transactions/services/categorizer.service'
 import { ReconciliationService } from '../../../transactions/services/reconciliation.service'
+import type { TransferMatcherService } from '../../../transactions/services/transfer-matcher.service'
 import type { AppLogger } from '../../../../core/logger'
 import { jobId } from '../../../../core/queue/job-id'
 
@@ -39,6 +40,7 @@ export type EmailIngestWorkerDeps = {
   readonly normalizer: NormalizerService
   readonly categorizer: CategorizerService
   readonly reconciliation: ReconciliationService
+  readonly transferMatcher: TransferMatcherService
   readonly logger: AppLogger
   readonly captureEmailQueue: Queue
 }
@@ -57,6 +59,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
   private readonly normalizer: NormalizerService
   private readonly categorizer: CategorizerService
   private readonly reconciliation: ReconciliationService
+  private readonly transferMatcher: TransferMatcherService
   private readonly logger: AppLogger
   private readonly captureEmailQueue: Queue
 
@@ -82,6 +85,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     this.normalizer = deps.normalizer
     this.categorizer = deps.categorizer
     this.reconciliation = deps.reconciliation
+    this.transferMatcher = deps.transferMatcher
     this.logger = deps.logger
     this.captureEmailQueue = deps.captureEmailQueue
   }
@@ -516,6 +520,26 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
         'Email transaction successfully ingested',
       )
       await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'TRANSACTION_CREATED')
+
+      // Is this one half of money the user moved between their own accounts?
+      //
+      // After the write, not before: the transaction is real either way, and
+      // being part of a transfer changes only how it is COUNTED. Failure here
+      // must never lose an ingested alert, so it is caught — the worst case is
+      // a transfer left showing as income and spending, which is exactly the
+      // status quo and is visible to the user.
+      try {
+        await this.transferMatcher.evaluate({
+          id: transaction.id,
+          userId: account.userId,
+          accountId,
+          amountKobo: parsedTx.amountKobo,
+          type: parsedTx.type,
+          transactionDate: parsedTx.transactionDate,
+        })
+      } catch (err) {
+        this.logger.warn({ err, transactionId: transaction.id }, 'transfer matching failed after ingest')
+      }
     } catch (err) {
       if (err && typeof err === 'object' && 'code' in err && (err as { code?: unknown }).code === 'P2002') {
         // Unique key constraint violation: transaction was already written concurrently

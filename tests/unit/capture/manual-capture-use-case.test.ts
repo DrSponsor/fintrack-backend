@@ -55,6 +55,7 @@ function makeTransactionRecord(overrides: Partial<TransactionRecord> = {}): Tran
     source: 'MANUAL',
     isVerified: false,
     providerRef: null,
+    transferGroupId: null,
     createdAt: new Date(),
     ...overrides,
   }

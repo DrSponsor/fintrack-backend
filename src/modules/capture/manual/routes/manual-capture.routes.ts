@@ -11,6 +11,8 @@ import { createAIProvider } from '../../../../core/ai/create-provider'
 import { authenticate, requireUser } from '../../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../../core/http/envelope'
 import { manualCaptureJsonSchema } from '../schemas/manual-capture.schemas'
+import { TransferMatcherService } from '../../../transactions/services/transfer-matcher.service'
+import { PrismaTransferRepository } from '../../../transactions/repositories/transfer.repo'
 
 export function registerManualCaptureRoutes(
   fastify: AppFastifyInstance,
@@ -40,6 +42,10 @@ export function registerManualCaptureRoutes(
     normalizer,
     categorizer,
     reconciliation,
+    transferMatcher: new TransferMatcherService({
+      repo: new PrismaTransferRepository(fastify.db.primary),
+      logger: fastify.log,
+    }),
     logger: fastify.log,
   })
 

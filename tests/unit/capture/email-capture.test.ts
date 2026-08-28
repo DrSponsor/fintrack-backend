@@ -314,6 +314,7 @@ describe('EmailIngestWorker', () => {
       normalizer: {} as any,
       categorizer: {} as any,
       reconciliation: new ReconciliationService(),
+      transferMatcher: { evaluate: vi.fn().mockResolvedValue({ linked: false }) } as never,
       logger: mockLogger,
       captureEmailQueue: mockQueue,
     })
@@ -399,6 +400,7 @@ describe('EmailIngestWorker', () => {
         } as any,
         categorizer: { categorize: vi.fn().mockResolvedValue('category-1') } as any,
         reconciliation: new ReconciliationService(),
+      transferMatcher: { evaluate: vi.fn().mockResolvedValue({ linked: false }) } as never,
         logger: mockLogger,
         captureEmailQueue: { add: vi.fn() } as any,
         ...overrides,

@@ -5,6 +5,7 @@ import type { ICategoryRepository } from '../../../categories/repositories/categ
 import type { NormalizerService } from '../../../transactions/services/normalizer.service'
 import type { CategorizerService } from '../../../transactions/services/categorizer.service'
 import { ReconciliationService } from '../../../transactions/services/reconciliation.service'
+import type { TransferMatcherService } from '../../../transactions/services/transfer-matcher.service'
 import { manualCaptureBodySchema } from '../schemas/manual-capture.schemas'
 import type { AppLogger } from '../../../../core/logger'
 
@@ -15,6 +16,9 @@ export type ManualCaptureUseCaseDeps = {
   readonly normalizer: NormalizerService
   readonly categorizer: CategorizerService
   readonly reconciliation: ReconciliationService
+  /** Optional so existing construction sites and tests need no change; when
+   *  absent, a manual entry simply never links to a transfer. */
+  readonly transferMatcher?: TransferMatcherService
   readonly logger: AppLogger
 }
 
@@ -44,6 +48,7 @@ export class ManualCaptureUseCase {
   private readonly normalizer: NormalizerService
   private readonly categorizer: CategorizerService
   private readonly reconciliation: ReconciliationService
+  private readonly transferMatcher: TransferMatcherService | undefined
   private readonly logger: AppLogger
 
   public constructor(deps: ManualCaptureUseCaseDeps) {
@@ -53,6 +58,7 @@ export class ManualCaptureUseCase {
     this.normalizer = deps.normalizer
     this.categorizer = deps.categorizer
     this.reconciliation = deps.reconciliation
+    this.transferMatcher = deps.transferMatcher
     this.logger = deps.logger
   }
 
@@ -129,6 +135,28 @@ export class ManualCaptureUseCase {
       { userId, transactionId: transaction.id, forced: force === true },
       'manual transaction captured',
     )
+
+    // Typed entries reach this too. Someone recording both sides of their own
+    // transfer by hand has the same problem as two bank alerts, and it would
+    // be odd for the app to catch it only when a bank told it.
+    //
+    // Failure never fails the entry: the transaction is what the user asked
+    // for, and being part of a transfer changes only how it is counted.
+    if (this.transferMatcher !== undefined) {
+      try {
+        await this.transferMatcher.evaluate({
+          id: transaction.id,
+          userId,
+          accountId,
+          amountKobo,
+          type,
+          transactionDate,
+        })
+      } catch (err) {
+        this.logger.warn({ err, transactionId: transaction.id }, 'transfer matching failed after manual capture')
+      }
+    }
+
     return { outcome: 'recorded', transaction }
   }
 

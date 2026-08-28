@@ -4,29 +4,28 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider = "postgresql"
 }
 
-
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  phone        String?  @unique
-  passwordHash String?  @map("password_hash")
-  googleId     String?  @unique @map("google_id")
-  tier         Tier     @default(FREE)
-  createdAt    DateTime @default(now()) @map("created_at")
+  id                  String    @id @default(uuid()) @db.Uuid
+  email               String    @unique
+  phone               String?   @unique
+  passwordHash        String?   @map("password_hash")
+  googleId            String?   @unique @map("google_id")
+  tier                Tier      @default(FREE)
+  createdAt           DateTime  @default(now()) @map("created_at")
   deletionScheduledAt DateTime? @map("deletion_scheduled_at")
 
-  accounts              Account[]
-  budgets               Budget[]
-  reports               Report[]
-  subscription          Subscription?
-  merchantPreferences   UserMerchantPreference[]
-  billingEvents         BillingEvent[]
-  deviceTokens          DeviceToken[]
+  accounts               Account[]
+  budgets                Budget[]
+  reports                Report[]
+  subscription           Subscription?
+  merchantPreferences    UserMerchantPreference[]
+  billingEvents          BillingEvent[]
+  deviceTokens           DeviceToken[]
   notificationPreference NotificationPreference?
-  emailAccessLogs       EmailAccessLog[]
+  emailAccessLogs        EmailAccessLog[]
 
   @@map("users")
 }
@@ -43,9 +42,9 @@ model Account {
   balanceKobo         BigInt        @default(0) @map("balance_kobo")
   lastTransactionDate DateTime?     @map("last_transaction_date")
 
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions     Transaction[]
-  emailAccessLogs  EmailAccessLog[]
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  emailAccessLogs EmailAccessLog[]
 
   @@index([userId])
   @@map("accounts")
@@ -69,6 +68,12 @@ model Transaction {
   /// unique index to include the partition key, so uniqueness is enforced in
   /// the application — see PrismaTransactionRepository.findByProviderRef.
   providerRef     String?         @map("provider_ref")
+  /// Links the two sides of money moved between the user's own accounts.
+  /// Both rows stay: each is a real alert from a different bank and each is
+  /// true from that bank's point of view. What is wrong is counting one as
+  /// income and the other as spending, so aggregates exclude any row carrying
+  /// this. Nullable, because most transactions are not transfers.
+  transferGroupId String?         @map("transfer_group_id") @db.Uuid
   idempotencyKey  String          @map("idempotency_key")
   createdAt       DateTime        @default(now()) @map("created_at")
 
@@ -82,6 +87,7 @@ model Transaction {
   @@index([accountId, transactionDate])
   @@index([categoryId, transactionDate])
   @@index([accountId, providerRef])
+  @@index([transferGroupId])
   @@map("transactions")
 }
 
@@ -118,15 +124,15 @@ model BudgetAlert {
 }
 
 model Category {
-  id           String   @id @default(uuid()) @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
   /// Stable slug. Used for lookups and never shown to a person.
-  name         String   @unique
+  name        String   @unique
   /// What a person reads. Lives here rather than in each client so adding a
   /// category is one change, and so two clients cannot disagree about what a
   /// category is called.
-  displayName  String   @map("display_name")
-  icon         String
-  createdAt    DateTime @default(now()) @map("created_at")
+  displayName String   @map("display_name")
+  icon        String
+  createdAt   DateTime @default(now()) @map("created_at")
 
   transactions        Transaction[]
   keywords            CategoryKeyword[]
@@ -299,20 +305,20 @@ model Subscription {
 }
 
 model BillingEvent {
-  id              String          @id @default(uuid()) @db.Uuid
-  provider        BillingProvider
-  providerEventId String          @unique @map("provider_event_id")
-  eventType       String          @map("event_type")
-  normalizedType  String          @map("normalized_type")
-  userId          String?         @map("user_id") @db.Uuid
-  anonymizedUserId String?        @map("anonymized_user_id") @db.Uuid
-  payload         Json
-  processed       Boolean         @default(false)
-  processedAt     DateTime?       @map("processed_at")
-  processingError String?         @map("processing_error")
-  createdAt       DateTime        @default(now()) @map("created_at")
+  id               String          @id @default(uuid()) @db.Uuid
+  provider         BillingProvider
+  providerEventId  String          @unique @map("provider_event_id")
+  eventType        String          @map("event_type")
+  normalizedType   String          @map("normalized_type")
+  userId           String?         @map("user_id") @db.Uuid
+  anonymizedUserId String?         @map("anonymized_user_id") @db.Uuid
+  payload          Json
+  processed        Boolean         @default(false)
+  processedAt      DateTime?       @map("processed_at")
+  processingError  String?         @map("processing_error")
+  createdAt        DateTime        @default(now()) @map("created_at")
 
-  user            User?           @relation(fields: [userId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([processed, createdAt])
@@ -426,4 +432,3 @@ model NotificationPreference {
 
   @@map("notification_preferences")
 }
-

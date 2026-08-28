@@ -38,7 +38,11 @@ describe('Prisma schema foundation laws', () => {
     expect(schema).toMatch(/idempotencyKey\s+String\s+/)
     expect(schema).toMatch(/@@unique\(\[idempotencyKey,\s*transactionDate\]\)/)
     expect(schema).toContain('@@unique([transactionId, budgetId])')
-    expect(schema).toContain('providerEventId String          @unique')
+    // Whitespace-tolerant, like the two assertions above. `prisma format`
+    // owns the column alignment in this file and re-flows a whole model
+    // whenever its widest field name changes, so pinning the exact spacing
+    // makes an unrelated field addition fail a law about uniqueness.
+    expect(schema).toMatch(/providerEventId\s+String\s+@unique/)
   })
 
   it('contains the categorisation feedback tables approved for Phase 1', () => {
