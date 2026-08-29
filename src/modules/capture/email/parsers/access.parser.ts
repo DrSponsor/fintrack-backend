@@ -1,5 +1,6 @@
 import type { IEmailParser, ParsedTransaction } from './parser.interface'
 import { parseAmountKobo, cleanText } from './utils'
+import { isPlausibleAccountMask, isPlausibleHolderName } from './pattern-safety'
 import { isPlausibleReference } from './pattern-safety'
 
 /**
@@ -161,6 +162,16 @@ export class AccessParser implements IEmailParser {
     const parsedDate = rawDate !== null ? parseAccessDate(rawDate) : null
     const balance = field(text, 'Available Balance')
 
+    // Both of these were already listed in LABELS and used only as terminators
+    // for the fields around them — the alert states who owns the account and
+    // which account it is, and every one of these was parsed past and dropped.
+    // They are what lets an alert be attributed to the right account, and what
+    // lets an account be discovered before the user has typed anything.
+    const rawMask = field(text, 'A/C Number')
+    const rawHolder = field(text, 'Account Name')
+    const accountMask = rawMask !== null && isPlausibleAccountMask(rawMask) ? rawMask.trim() : undefined
+    const accountHolder = rawHolder !== null && isPlausibleHolderName(rawHolder) ? rawHolder.trim() : undefined
+
     // Access prints its own transaction id in the summary table, and it is the
     // only field here that can settle whether two alerts describe the same
     // payment by equality rather than judgement. Run through the same shape
@@ -179,6 +190,8 @@ export class AccessParser implements IEmailParser {
       // misdates a historical transaction, so it must never be silent.
       transactionDate: parsedDate ?? new Date(),
       ...(balance !== null ? { balanceAfterKobo: parseAmountKobo(balance) } : {}),
+      ...(accountMask !== undefined ? { accountMask } : {}),
+      ...(accountHolder !== undefined ? { accountHolder } : {}),
       ...(reference !== undefined ? { reference } : {}),
     })
   }

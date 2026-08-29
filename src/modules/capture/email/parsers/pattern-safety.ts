@@ -404,3 +404,85 @@ export function redactForModel(text: string): string {
     .replace(/\b(Dear|Hi|Hello)\s+(REDACTED\s*)+/g, '$1 ACCOUNT HOLDER ')
     .slice(0, MAX_TEXT_LENGTH)
 }
+
+/**
+ * Whether a captured string is plausibly a masked account number.
+ *
+ * Banks mask differently — `012******345`, `****4471`, `0117` — so the shape
+ * cannot be pinned. What can be required is that it is SHORT, contains at
+ * least two digits, and is made only of digits and masking characters. That
+ * rejects the common mis-capture, which is a sentence or a name that happened
+ * to sit next to the label.
+ *
+ * A wrong mask is not merely useless: alerts are attributed to accounts by it,
+ * so a mis-captured one files another account's transactions under this one.
+ */
+export function isPlausibleAccountMask(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length < 4 || trimmed.length > 24) return false
+  if (!/^[0-9*xX•·\- ]+$/.test(trimmed)) return false
+  return (trimmed.match(/\d/g) ?? []).length >= 2
+}
+
+/**
+ * Whether a captured string is plausibly a person's or business's name.
+ *
+ * Deliberately permissive about CONTENT — Nigerian names vary widely and this
+ * must not become a list of what a name is allowed to look like — and strict
+ * about SHAPE. It rejects the two things that actually get mis-captured: a run
+ * of digits (an account number or a reference in the wrong slot), and a
+ * fragment long enough to be a sentence rather than a name.
+ *
+ * The user confirms the account anyway, so this only has to be good enough to
+ * avoid showing them nonsense.
+ */
+export function isPlausibleHolderName(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length < 3 || trimmed.length > 80) return false
+  // Must contain letters, and must not be mostly digits.
+  const letters = (trimmed.match(/[A-Za-z]/g) ?? []).length
+  const digits = (trimmed.match(/\d/g) ?? []).length
+  return letters >= 3 && letters > digits
+}
+
+/**
+ * Redaction for ACCOUNT DISCOVERY, which needs the opposite of the above.
+ *
+ * `redactForModel` exists so a model can write a regex: it needs the SHAPE of
+ * a document — labels, layout, the format of figures — and none of the
+ * identity. So it masks account numbers and the holder's name, which is
+ * exactly right for that job.
+ *
+ * Discovery asks a different question: "whose account is this, and which
+ * one?". Run through the same redaction, every alert reduces to
+ * `A/C Number ############ / Account Name REDACTED REDACTED`, and the answer
+ * has been destroyed before the model sees it.
+ *
+ * ── What this keeps, and why that is defensible ──────────────────────────
+ *
+ *   ALREADY-MASKED ACCOUNT NUMBERS are kept. `012******345` was masked by the
+ *   BANK, which decided how much of it a person may see. Masking it again
+ *   protects nothing and removes the only thing that distinguishes one
+ *   account from another.
+ *
+ *   THE HOLDER NAME is kept, because it is the field that lets a person
+ *   recognise their own account in a list. This is a real disclosure and
+ *   worth stating plainly — though note the app ALREADY sends counterparty
+ *   names to the same provider on every uncategorised merchant, and those are
+ *   third parties. A user's own name, once, is the smaller exposure.
+ *
+ * ── What this still removes ──────────────────────────────────────────────
+ * Unmasked long digit runs: full account numbers, phone numbers, BVNs, card
+ * numbers. A bank that prints the whole account number does not get to leak
+ * it just because discovery is running.
+ */
+export function redactForDiscovery(text: string): string {
+  return (
+    text
+      // Long digit runs, but ONLY where the bank has not already masked them.
+      // The negative lookahead lets `012******345` through while still
+      // catching a bare `0123456789`.
+      .replace(/\b\d{7,}\b/g, (match) => '#'.repeat(match.length))
+      .slice(0, MAX_TEXT_LENGTH)
+  )
+}

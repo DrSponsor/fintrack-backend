@@ -19,6 +19,30 @@ export interface ParsedTransaction {
    * start collapsing into each other.
    */
   readonly reference?: string | undefined
+  /**
+   * The account number exactly as the bank masks it — "012******345".
+   *
+   * This is what lets an alert be attributed to an account the app already
+   * knows, instead of trusting the four digits somebody typed into a form. It
+   * is also how an account gets DISCOVERED in the first place: an alert naming
+   * an account the user has not registered is the app noticing a bank account
+   * before the user has told it about one.
+   *
+   * Stored masked, never reconstructed. The bank chose how much to reveal and
+   * there is no reason for this app to hold more than the bank prints.
+   */
+  readonly accountMask?: string | undefined
+  /**
+   * The account holder, as the bank states it.
+   *
+   * Weak evidence on its own — a name in an email proves nothing — but it is
+   * the only field that says WHOSE account an alert describes, which is what
+   * makes a discovered account reviewable by the person confirming it.
+   *
+   * Treated as third-party personal data until the user confirms the account
+   * is theirs: shown to them, and never persisted before they say so.
+   */
+  readonly accountHolder?: string | undefined
 }
 
 export interface IEmailParser {

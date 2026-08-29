@@ -135,3 +135,51 @@ Total Spent (Kobo): ${summary.totalSpentKobo}
 Total Income (Kobo): ${summary.totalIncomeKobo}
 `
 }
+
+/**
+ * Account discovery.
+ *
+ * ── Why this is a prompt and not eleven parsers ──────────────────────────
+ * Attributing every future alert correctly is hard, which is why the parser
+ * path needs verified regexes and a per-bank cache. Answering "which accounts
+ * appear in this inbox?" ONCE is not hard, and it has a property the parsing
+ * problem does not: a person immediately checks the answer.
+ *
+ * That inverts the cost of being wrong. A bad regex is cached and silently
+ * mis-states every transaction from that bank forever. A bad discovery is a
+ * row the user does not recognise and does not tick.
+ *
+ * So this asks for no regexes and no per-bank code, and works on the first
+ * email from a bank nobody has written a parser for.
+ *
+ * The model is told to omit rather than guess, because an invented account
+ * number is the one output a user cannot evaluate — they will not know
+ * whether they simply do not recognise their own masked number.
+ */
+export const accountDiscoveryPrompt = `You read bank alert emails and list the BANK ACCOUNTS that appear in them.
+
+You are given several emails. Return ONLY a JSON object of the form:
+
+{"accounts":[{"bankName":"...","accountMask":"...","holderName":"..."}]}
+
+For each DISTINCT account you find:
+
+  "bankName"     the bank or wallet that sent the alert, as a person would say
+                 it — "Access Bank", "Opay", "GTBank", "Kuda". Not a domain.
+  "accountMask"  the account number EXACTLY as printed, keeping any masking
+                 characters the bank used. Copy it character for character:
+                 "012******345" stays "012******345".
+  "holderName"   the account holder as stated in the email, if stated.
+
+Rules:
+- One entry per distinct account. If ten emails describe the same account, return it ONCE.
+- Copy values exactly as they appear. Never reformat, complete, or tidy an account number.
+- If an email does not state an account number, do not invent one — omit that account entirely.
+- If an email does not state a holder name, set "holderName" to null. Do not guess it from the greeting of a different email.
+- Runs of # are numbers that were removed before you saw them. Never return a value containing #.
+- Return an empty array if no bank account is identifiable.
+
+Accuracy matters more than completeness. A person is shown this list and asked
+which accounts are theirs, so an account you invent is one they cannot
+recognise and cannot correct.
+`
