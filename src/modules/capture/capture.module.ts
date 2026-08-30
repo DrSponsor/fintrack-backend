@@ -23,16 +23,7 @@ import { TransferMatcherService } from '../transactions/services/transfer-matche
 import { PrismaTransferRepository } from '../transactions/repositories/transfer.repo'
 
 // Concrete Bank Parsers
-import { GtbParser } from './email/parsers/gtb.parser'
 import { AccessParser } from './email/parsers/access.parser'
-import { ZenithParser } from './email/parsers/zenith.parser'
-import { UbaParser } from './email/parsers/uba.parser'
-import { FirstBankParser } from './email/parsers/firstbank.parser'
-import { KudaParser } from './email/parsers/kuda.parser'
-import { OpayParser } from './email/parsers/opay.parser'
-import { MoniepointParser } from './email/parsers/moniepoint.parser'
-import { WemaParser } from './email/parsers/wema.parser'
-import { FidelityParser } from './email/parsers/fidelity.parser'
 
 const captureModule: AppFastifyPluginAsync = async (fastify) => {
   const logger = fastify.log
@@ -62,16 +53,7 @@ const captureModule: AppFastifyPluginAsync = async (fastify) => {
   const safetyFilter = new SafetyFilterService()
 
   const parsers = [
-    new GtbParser(),
     new AccessParser(),
-    new ZenithParser(),
-    new UbaParser(),
-    new FirstBankParser(),
-    new KudaParser(),
-    new OpayParser(),
-    new MoniepointParser(),
-    new WemaParser(),
-    new FidelityParser(),
   ]
   const parserRegistry = new ParserRegistryService({ parsers })
 

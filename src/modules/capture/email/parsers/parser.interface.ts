@@ -49,5 +49,28 @@ export interface IEmailParser {
   readonly parserId: string
   readonly bankName: string
   readonly supportedDomains: readonly string[]
+  /**
+   * Whether this parser has been checked against mail a bank actually sent.
+   *
+   * ── Why this is a field and not a comment ────────────────────────────────
+   * A hand-written parse used to be trusted simply because it returned
+   * something: `isVerified = parsedTx !== null`. That gave any registered
+   * parser the highest trust level in the system on no evidence at all, which
+   * is backwards — the AI path, which is trusted LESS, is the one that
+   * round-trip verifies every field and sanity-checks magnitudes, directions
+   * and dates before believing itself.
+   *
+   * It was not hypothetical. Nine parsers were written against an invented
+   * format (`Amt: NGN 5,000.00 Cr; Desc: ...`) and each had a fixture asserting
+   * that same invented format, so they passed CI indefinitely. The one member
+   * of that family that ever met real mail — Access — failed all 41 alerts in
+   * a live mailbox, having been green the whole time.
+   *
+   * So trust is now declared rather than inferred, and the default is no. A
+   * parser added tomorrow cannot quietly inherit "verified" by existing; a
+   * person has to set this to true, and should only do so having run it
+   * against a real captured alert.
+   */
+  readonly validatedAgainstRealMail: boolean
   parse(subject: string, bodyHtml: string, bodyText: string): Promise<ParsedTransaction | null>
 }

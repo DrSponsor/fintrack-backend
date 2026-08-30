@@ -141,6 +141,15 @@ export class AccessParser implements IEmailParser {
   public readonly parserId = '6ba7b810-9dad-11d1-80b4-00c04fd430c2'
   public readonly bankName = 'Access Bank'
   public readonly supportedDomains = ['accessbankplc.com'] as const
+  /**
+   * True, and this is the only parser that may say so.
+   *
+   * Earned the hard way: the previous version of this file passed its own unit
+   * test while returning null for all 41 real Access alerts in a live mailbox.
+   * It was rewritten against captured mail, and its test now exercises the HTML
+   * table Access actually sends rather than a format someone imagined.
+   */
+  public readonly validatedAgainstRealMail = true
 
   public parse(subject: string, bodyHtml: string, bodyText: string): Promise<ParsedTransaction | null> {
     const text = cleanText(bodyHtml || bodyText)

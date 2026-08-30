@@ -303,8 +303,11 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     const staticParser = this.parserRegistry.getParserForDomain(email.senderDomain)
     if (staticParser !== null) {
       parsedTx = await staticParser.parse(email.subject, email.bodyHtml, email.bodyText)
-      // Only a SUCCESSFUL hand-written parse is inherently trusted.
-      isVerified = parsedTx !== null
+      // Trust is declared by the parser, not inferred from it having returned
+      // something. `parsedTx !== null` alone granted the highest trust in the
+      // system to any registered parser on no evidence — see
+      // IEmailParser.validatedAgainstRealMail for what that cost.
+      isVerified = parsedTx !== null && staticParser.validatedAgainstRealMail
     }
 
     if (parsedTx === null) {

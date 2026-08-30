@@ -1,14 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SafetyFilterService } from '../../../src/modules/capture/email/services/safety-filter.service'
-import { GtbParser } from '../../../src/modules/capture/email/parsers/gtb.parser'
-import { ZenithParser } from '../../../src/modules/capture/email/parsers/zenith.parser'
-import { UbaParser } from '../../../src/modules/capture/email/parsers/uba.parser'
-import { FirstBankParser } from '../../../src/modules/capture/email/parsers/firstbank.parser'
-import { KudaParser } from '../../../src/modules/capture/email/parsers/kuda.parser'
-import { OpayParser } from '../../../src/modules/capture/email/parsers/opay.parser'
-import { MoniepointParser } from '../../../src/modules/capture/email/parsers/moniepoint.parser'
-import { WemaParser } from '../../../src/modules/capture/email/parsers/wema.parser'
-import { FidelityParser } from '../../../src/modules/capture/email/parsers/fidelity.parser'
 import { DiscoveryService } from '../../../src/modules/capture/email/services/discovery.service'
 import { EmailIngestWorker } from '../../../src/modules/capture/email/workers/email-ingest.worker'
 import { GmailQuotaExhaustedError } from '../../../src/modules/capture/email/services/fetch.service'
@@ -112,126 +103,24 @@ describe('SafetyFilterService', () => {
   })
 })
 
-describe('Bank Parsers (Table-Driven)', () => {
-  const testCases = [
-    {
-      parser: new GtbParser(),
-      bank: 'GTBank',
-      subject: 'GTBank Transaction Alert',
-      body: 'Amt: NGN 5,000.00 Cr; Desc: Transfer from Mom; Date: 14-Jun-2026; Bal: NGN 15,000.00',
-      expectedAmount: 500000n,
-      expectedType: 'CREDIT',
-      expectedMerchant: 'Transfer from Mom',
-      expectedBalance: 1500000n,
-    },
-    // Access Bank has moved to tests/unit/capture/access-parser.test.ts, which
-    // exercises the real HTML Access actually sends.
-    //
-    // The fixture that lived here asserted
-    //   'Amt of NGN 10,500.50 Dr; Desc: POS SPAR; Date: 14-Jun-2026; ...'
-    // — semicolon-delimited Label: value pairs. Access sends an HTML table with
-    // no colons and no Amt label at all. The test passed for as long as it
-    // existed while the parser failed on every one of the 41 real alerts in a
-    // live mailbox, because fixture and parser were written from the same
-    // assumption and only ever checked against each other.
-    //
-    // The remaining rows below are the same shape and were written the same
-    // way, so they carry the same risk: passing here is not evidence that any
-    // of them parses real mail. Each needs replacing with a captured alert as
-    // samples become available.
-    {
-      parser: new ZenithParser(),
-      bank: 'Zenith Bank',
-      subject: 'Zenith Transaction Notification',
-      body: 'Amount: NGN 2,500.00 Cr; Description: Interest Payment; Date: 14-Jun-2026; Balance: NGN 50,000.00',
-      expectedAmount: 250000n,
-      expectedType: 'CREDIT',
-      expectedMerchant: 'Interest Payment',
-      expectedBalance: 5000000n,
-    },
-    {
-      parser: new UbaParser(),
-      bank: 'UBA',
-      subject: 'UBA Transaction Alert',
-      body: 'Amount: NGN 1,200.00 Dr; Remarks: Transfer to John; Date: 14-Jun-2026; Balance: NGN 8,800.00',
-      expectedAmount: 120000n,
-      expectedType: 'DEBIT',
-      expectedMerchant: 'Transfer to John',
-      expectedBalance: 880000n,
-    },
-    {
-      parser: new FirstBankParser(),
-      bank: 'FirstBank',
-      subject: 'FirstBank Transaction Alert',
-      body: 'Amount: NGN 100,000.00 Cr; Narration: Salary; Date: 14-Jun-2026; Balance: NGN 120,000.00',
-      expectedAmount: 10000000n,
-      expectedType: 'CREDIT',
-      expectedMerchant: 'Salary',
-      expectedBalance: 12000000n,
-    },
-    {
-      parser: new KudaParser(),
-      bank: 'Kuda',
-      subject: 'Kuda Transaction Alert',
-      body: 'Amount: NGN 3,500.00 Dr; Narration: Netflix; Date: 14-Jun-2026; Balance: NGN 6,500.00',
-      expectedAmount: 350000n,
-      expectedType: 'DEBIT',
-      expectedMerchant: 'Netflix',
-      expectedBalance: 650000n,
-    },
-    {
-      parser: new OpayParser(),
-      bank: 'OPay',
-      subject: 'OPay Alert',
-      body: 'Amount: NGN 450.00 Dr; Narration: Ride; Date: 14-Jun-2026; Balance: NGN 2,550.00',
-      expectedAmount: 45000n,
-      expectedType: 'DEBIT',
-      expectedMerchant: 'Ride',
-      expectedBalance: 255000n,
-    },
-    {
-      parser: new MoniepointParser(),
-      bank: 'Moniepoint',
-      subject: 'Moniepoint Transaction Alert',
-      body: 'Amount: NGN 15,000.00 Cr; Narration: Transfer; Date: 14-Jun-2026; Balance: NGN 20,000.00',
-      expectedAmount: 1500000n,
-      expectedType: 'CREDIT',
-      expectedMerchant: 'Transfer',
-      expectedBalance: 2000000n,
-    },
-    {
-      parser: new WemaParser(),
-      bank: 'Wema Bank',
-      subject: 'Wema Alert',
-      body: 'Amount: NGN 8,000.00 Dr; Narration: POS; Date: 14-Jun-2026; Balance: NGN 12,000.00',
-      expectedAmount: 800000n,
-      expectedType: 'DEBIT',
-      expectedMerchant: 'POS',
-      expectedBalance: 1200000n,
-    },
-    {
-      parser: new FidelityParser(),
-      bank: 'Fidelity Bank',
-      subject: 'Fidelity Alert',
-      body: 'Amount: NGN 60,000.00 Cr; Narration: Dividends; Date: 14-Jun-2026; Balance: NGN 100,000.00',
-      expectedAmount: 6000000n,
-      expectedType: 'CREDIT',
-      expectedMerchant: 'Dividends',
-      expectedBalance: 10000000n,
-    },
-  ]
-
-  for (const tc of testCases) {
-    it(`should parse typical ${tc.bank} alerts correctly`, async () => {
-      const parsed = await tc.parser.parse(tc.subject, tc.body, '')
-      expect(parsed).not.toBeNull()
-      expect(parsed!.amountKobo).toBe(tc.expectedAmount)
-      expect(parsed!.type).toBe(tc.expectedType)
-      expect(parsed!.merchantName).toBe(tc.expectedMerchant)
-      expect(parsed!.balanceAfterKobo).toBe(tc.expectedBalance)
-    })
-  }
-})
+/*
+ * The table-driven bank parser suite lived here and has been removed with the
+ * nine parsers it covered.
+ *
+ * Every fixture in it asserted one invented shape —
+ *   'Amt: NGN 5,000.00 Cr; Desc: ...; Date: ...; Bal: ...'
+ * — and each parser was written to that same shape, so the suite only ever
+ * checked the parsers against the assumption that produced them. It was green
+ * for as long as it existed.
+ *
+ * The one member of that family that ever met real mail was Access, which
+ * failed all 41 alerts in a live mailbox while this suite passed. Its
+ * replacement is tests/unit/capture/access-parser.test.ts, written against the
+ * HTML Access actually sends.
+ *
+ * A parser earns a test here by being run against a captured alert first, not
+ * by being written alongside a fixture that agrees with it.
+ */
 
 describe('DiscoveryService', () => {
   it('should list and queue messages from history endpoint', async () => {
@@ -577,6 +466,63 @@ describe('EmailIngestWorker', () => {
       expect(mockEmailAccessLogRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ outcome: 'DUPLICATE_SUPPRESSED' }),
       )
+    })
+
+
+    describe('trust in a hand-written parser', () => {
+      /** A parser that returns a perfectly plausible transaction. */
+      function parserDeclaring(validatedAgainstRealMail: boolean) {
+        return {
+          parserId: 'p-1',
+          bankName: 'Test Bank',
+          supportedDomains: ['testbank.test'],
+          validatedAgainstRealMail,
+          parse: vi.fn().mockResolvedValue({
+            merchantName: 'POS Purchase',
+            amountKobo: 100000n,
+            type: 'DEBIT',
+            transactionDate: new Date(),
+          }),
+        }
+      }
+
+      it('does not mark a parse verified when the parser has never seen real mail', async () => {
+        // The regression that matters. Trust used to be inferred from the parse
+        // simply having returned something, which handed the highest confidence
+        // in the system to nine parsers written against an invented format.
+        const parser = parserDeclaring(false)
+        const { deps } = makeDeps({
+          parserRegistry: { getParserForDomain: vi.fn().mockReturnValue(parser) },
+        })
+        const worker = new EmailIngestWorker(deps)
+        await (worker as any).processJob({
+          name: 'ingest-message',
+          data: { accountId: 'account-1', messageId: 'msg-unvalidated' },
+        } as any)
+
+        // Both assertions are needed. The AI fallback also yields
+        // isVerified: false, so without proving the static parser actually ran
+        // this would pass even if the hand-written path were skipped entirely.
+        expect(parser.parse).toHaveBeenCalled()
+        expect(deps.transactionRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ isVerified: false }),
+        )
+      })
+
+      it('marks it verified when the parser has been checked against real mail', async () => {
+        const { deps } = makeDeps({
+          parserRegistry: { getParserForDomain: vi.fn().mockReturnValue(parserDeclaring(true)) },
+        })
+        const worker = new EmailIngestWorker(deps)
+        await (worker as any).processJob({
+          name: 'ingest-message',
+          data: { accountId: 'account-1', messageId: 'msg-validated' },
+        } as any)
+
+        expect(deps.transactionRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ isVerified: true }),
+        )
+      })
     })
 
     describe('the bank reference', () => {
