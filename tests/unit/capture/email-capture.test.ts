@@ -255,6 +255,9 @@ describe('EmailIngestWorker', () => {
             gmailConnected: true,
             accountLast4: '1234',
           }),
+          findByUserId: vi.fn().mockResolvedValue([
+            { id: 'account-1', accountLast4: '1234' },
+          ]),
         } as any,
         transactionRepo: {
           create: vi.fn().mockResolvedValue({ id: 'tx-1' }),
@@ -468,6 +471,68 @@ describe('EmailIngestWorker', () => {
       )
     })
 
+
+    describe('which account the alert is about', () => {
+      /** An alert whose masked number ends in the digits of the second account. */
+      const namingSecondAccount = {
+        parse: vi.fn().mockResolvedValue({
+          tx: {
+            merchantName: 'POS Purchase',
+            amountKobo: 100000n,
+            type: 'DEBIT',
+            transactionDate: new Date(),
+            accountMask: '012******802',
+          },
+          isVerified: false,
+        }),
+      }
+
+      const twoAccounts = {
+        findById: vi.fn().mockResolvedValue({
+          id: 'account-1',
+          userId: 'user-1',
+          gmailConnected: true,
+          accountLast4: '1234',
+        }),
+        findByUserId: vi.fn().mockResolvedValue([
+          { id: 'account-1', accountLast4: '1234' },
+          { id: 'account-2', accountLast4: '8802' },
+        ]),
+      }
+
+      it('files the row against the account the bank named, not the one the job carried', async () => {
+        // The webhook queues one job per connected account for the same
+        // notification, so the job id is a race winner rather than an answer.
+        const { deps } = makeDeps({
+          aiUniversalParser: namingSecondAccount,
+          accountRepo: twoAccounts,
+        })
+        const worker = new EmailIngestWorker(deps)
+        await (worker as any).processJob({
+          name: 'ingest-message',
+          data: { accountId: 'account-1', messageId: 'msg-attribution' },
+        } as any)
+
+        expect(deps.transactionRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ accountId: 'account-2' }),
+        )
+      })
+
+      it('keeps the job account when the alert states no account number', async () => {
+        // No opinion means no change. Acting on a mask this codebase has never
+        // seen would be guessing, and a wrong attribution is invisible.
+        const { deps } = makeDeps({ accountRepo: twoAccounts })
+        const worker = new EmailIngestWorker(deps)
+        await (worker as any).processJob({
+          name: 'ingest-message',
+          data: { accountId: 'account-1', messageId: 'msg-no-mask' },
+        } as any)
+
+        expect(deps.transactionRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ accountId: 'account-1' }),
+        )
+      })
+    })
 
     describe('trust in a hand-written parser', () => {
       /** A parser that returns a perfectly plausible transaction. */

@@ -16,6 +16,7 @@ import type { DiscoveryService } from '../services/discovery.service'
 import type { NormalizerService } from '../../../transactions/services/normalizer.service'
 import type { CategorizerService } from '../../../transactions/services/categorizer.service'
 import { ReconciliationService } from '../../../transactions/services/reconciliation.service'
+import { attributeByMask } from '../services/account-attribution'
 import type { TransferMatcherService } from '../../../transactions/services/transfer-matcher.service'
 import type { AppLogger } from '../../../../core/logger'
 import { jobId } from '../../../../core/queue/job-id'
@@ -333,6 +334,50 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       return
     }
 
+    // 5b. Which account is this alert actually about?
+    //
+    // The job's accountId is not an answer: the Gmail webhook queues one job
+    // per connected account for the same notification, so N jobs carry the same
+    // message under N different account ids, and global deduplication means the
+    // first worker to finish decides where the row lands. That is a race, not
+    // an attribution. See account-attribution.ts.
+    //
+    // Deliberately phased. A confirmed match is applied, because that is the
+    // fix. Everything else keeps the previous behaviour, because the masking
+    // format has exactly one sample in this codebase and that sample was
+    // replaced during a PII sweep — acting destructively on an unverified
+    // format is how nine parsers came to assert one nobody had checked. The
+    // uncertain cases are made loud instead, and tighten once a real mask has
+    // been confirmed against a live alert.
+    const ownedAccounts = await this.accountRepo.findByUserId(account.userId)
+    const attribution = attributeByMask(parsedTx.accountMask, ownedAccounts)
+    let resolvedAccountId = accountId
+
+    if (attribution.kind === 'matched') {
+      if (attribution.accountId !== accountId) {
+        this.logger.info(
+          { messageId, jobAccountId: accountId, resolvedAccountId: attribution.accountId },
+          'Alert re-attributed from the job’s account to the one the bank named',
+        )
+      }
+      resolvedAccountId = attribution.accountId
+    } else if (attribution.kind === 'ambiguous') {
+      this.logger.warn(
+        { messageId, candidates: attribution.accountIds },
+        'Two accounts share the digits this alert revealed; leaving attribution as the job set it',
+      )
+    } else if (attribution.kind === 'unknown') {
+      // The user receives alerts for a bank account they have not registered.
+      // Today this still files under the job's account, which is wrong — but
+      // skipping the write on an unverified format risks dropping every
+      // transaction, which is worse. This log is what the discovery flow turns
+      // into an offer to add the account.
+      this.logger.warn(
+        { messageId, senderDomain: email.senderDomain, filedUnder: accountId },
+        'Alert names an account this user has not registered; filed under the job’s account for now',
+      )
+    }
+
     // 6. Normalization
     const normalizedName = this.normalizer.normalizeMerchantName(parsedTx.merchantName)
     const fingerprint = this.normalizer.getMerchantFingerprint(normalizedName)
@@ -364,7 +409,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     // that bank, quietly collapsing unrelated payments into one another.
     let trustedReference = parsedTx.reference
     if (trustedReference !== undefined) {
-      const sharing = await this.transactionRepo.findByProviderRef(accountId, trustedReference)
+      const sharing = await this.transactionRepo.findByProviderRef(resolvedAccountId, trustedReference)
 
       // A genuine reference names one payment, so every row already carrying it
       // must agree on the amount and direction. One that does not is proof the
@@ -421,7 +466,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     // cache must never be able to quietly switch deduplication off.
     const window = ReconciliationService.windowMs
     const candidates = await this.transactionRepo.findMatchCandidates({
-      accountId,
+      accountId: resolvedAccountId,
       amountKobo: parsedTx.amountKobo,
       type: parsedTx.type,
       from: new Date(parsedTx.transactionDate.getTime() - window),
@@ -503,7 +548,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     // 9. DB Write (atomic, PgBouncer-safe transaction)
     try {
       const transaction = await this.transactionRepo.create({
-        accountId,
+        accountId: resolvedAccountId,
         amountKobo: parsedTx.amountKobo,
         type: parsedTx.type,
         merchantName: normalizedName,
