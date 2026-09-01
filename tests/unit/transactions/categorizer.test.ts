@@ -30,6 +30,7 @@ function createMockMappingRepo(overrides: Partial<ICategorizationRepository> = {
 function createMockAIProvider(overrides: Partial<IAIProvider> = {}): IAIProvider {
   return {
     providerName: 'deepseek',
+    complete: vi.fn().mockResolvedValue(null),
     categorize: vi.fn().mockResolvedValue({ categoryId: 'uncategorised-id', confidence: 0 }),
     generateInsightNarrative: vi.fn().mockResolvedValue(''),
     generateParserPattern: vi.fn().mockResolvedValue({}),

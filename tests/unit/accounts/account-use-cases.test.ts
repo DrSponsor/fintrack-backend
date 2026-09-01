@@ -30,6 +30,8 @@ function makeAccount(overrides: Partial<AccountRecord> = {}): AccountRecord {
     id: randomUUID(),
     userId: '00000000-0000-0000-0000-000000000001',
     bankName: 'Access Bank',
+    accountMask: null,
+    holderName: null,
     accountLast4: '4321',
     accountType: 'CURRENT',
     captureMethod: 'MANUAL',

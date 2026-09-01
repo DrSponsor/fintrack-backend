@@ -97,3 +97,47 @@ describe('attributeByMask', () => {
     expect(attributeByMask('012******471', []).kind).toBe('unknown')
   })
 })
+
+describe('an account discovered from an alert', () => {
+  // Discovery stores the bank's own masked number and may have no typed
+  // last-four at all, because Access reveals three digits and padding to four
+  // would invent one.
+  const DISCOVERED: AttributableAccount = { id: 'discovered', accountMask: '012******345' }
+
+  it('is recognised by the mask the bank printed', () => {
+    const result = attributeByMask('012******345', [DISCOVERED])
+
+    expect(result.kind).toBe('matched')
+    if (result.kind === 'matched') expect(result.accountId).toBe('discovered')
+  })
+
+  it('prefers the mask over a typed last-four that disagrees', () => {
+    // The bank's own statement outranks somebody's recollection of it. If the
+    // two disagree, the typed one is the one that can be wrong.
+    const mixed: AttributableAccount = {
+      id: 'mixed',
+      accountMask: '012******345',
+      accountLast4: '9999',
+    }
+    const result = attributeByMask('012******345', [mixed])
+
+    expect(result.kind).toBe('matched')
+  })
+
+  it('matches a typed four-digit account against a three-digit reveal', () => {
+    const typed: AttributableAccount = { id: 'typed', accountLast4: '0257' }
+    expect(attributeByMask('012******345', [typed]).kind).toBe('matched')
+  })
+
+  it('matches a three-digit account against a four-digit reveal', () => {
+    // The comparison runs in whichever direction has more digits, so neither
+    // side has to be the longer one.
+    const discovered: AttributableAccount = { id: 'short', accountMask: '012******345' }
+    expect(attributeByMask('*****0257', [discovered]).kind).toBe('matched')
+  })
+
+  it('ignores an account carrying neither a mask nor enough digits', () => {
+    const useless: AttributableAccount = { id: 'useless', accountLast4: '7' }
+    expect(attributeByMask('012******345', [useless]).kind).toBe('unknown')
+  })
+})

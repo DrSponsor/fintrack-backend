@@ -78,12 +78,15 @@ export class DeepSeekProvider implements IAIProvider {
       if (action === 'pattern') {
         return '{}'
       }
+      if (action === 'complete') {
+        return ''
+      }
       return 'Could not generate AI insights at this time. This is a spending summary, not financial advice.'
     })
   }
 
   private async callDeepSeek(
-    action: 'categorize' | 'insight' | 'pattern',
+    action: 'categorize' | 'insight' | 'pattern' | 'complete',
     systemPrompt: string,
     userPrompt: string,
   ): Promise<string> {
@@ -105,7 +108,7 @@ export class DeepSeekProvider implements IAIProvider {
         ],
         temperature: 0.1,
         response_format:
-          action === 'categorize' || action === 'pattern'
+          action === 'categorize' || action === 'pattern' || action === 'complete'
             ? { type: 'json_object' }
             : undefined,
       }),
@@ -164,6 +167,17 @@ Direction: ${direction}`
       return await this.breaker.fire('insight', insightPrompt, insightUserPrompt(reportSummary))
     } catch {
       return 'Could not generate AI insights at this time. This is a spending summary, not financial advice.'
+    }
+  }
+
+  public async complete(systemPrompt: string, userPrompt: string): Promise<string | null> {
+    this.lastError = undefined
+    try {
+      const text = await this.breaker.fire('complete', systemPrompt, userPrompt)
+      return text.length > 0 ? text : null
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err)
+      return null
     }
   }
 

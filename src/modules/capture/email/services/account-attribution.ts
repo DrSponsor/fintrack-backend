@@ -55,8 +55,25 @@ export type Attribution =
 
 export type AttributableAccount = {
   readonly id: string
-  /** Exactly four digits — enforced by createAccountBodySchema. */
-  readonly accountLast4: string
+  /**
+   * The masked number as the bank prints it, when the account was discovered
+   * from an alert rather than typed. Preferred over `accountLast4`: it is the
+   * bank's own statement, and it is the same string the incoming alert
+   * carries, so the two agree by construction.
+   */
+  readonly accountMask?: string | null
+  /** The four digits the user typed, when they typed any. */
+  readonly accountLast4?: string | null
+}
+
+/** The digits an account can be recognised by, whichever way it was created. */
+function accountTail(account: AttributableAccount): string | null {
+  if (account.accountMask != null) {
+    const fromMask = revealedTail(account.accountMask)
+    if (fromMask !== null) return fromMask
+  }
+  const typed = account.accountLast4
+  return typed != null && typed.length >= MIN_REVEALED_DIGITS ? typed : null
 }
 
 /**
@@ -97,9 +114,14 @@ export function attributeByMask(
     }
   }
 
-  // endsWith, not equality: the bank may reveal three digits where the account
-  // was registered with four.
-  const hits = accounts.filter((account) => account.accountLast4.endsWith(tail))
+  // endsWith in whichever direction has more digits, because the two sides can
+  // legitimately differ in length: the bank may reveal three where the user
+  // typed four, and vice versa.
+  const hits = accounts.filter((account) => {
+    const own = accountTail(account)
+    if (own === null) return false
+    return own.length >= tail.length ? own.endsWith(tail) : tail.endsWith(own)
+  })
 
   if (hits.length === 1) {
     const only = hits[0]

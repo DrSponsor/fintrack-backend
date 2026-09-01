@@ -32,6 +32,8 @@ function makeAccountRecord(overrides: Partial<AccountRecord> = {}): AccountRecor
     id: randomUUID(),
     userId: 'user-1',
     bankName: 'Guaranty Trust Bank',
+    accountMask: null,
+    holderName: null,
     accountLast4: '1234',
     accountType: 'CURRENT',
     captureMethod: 'MANUAL',

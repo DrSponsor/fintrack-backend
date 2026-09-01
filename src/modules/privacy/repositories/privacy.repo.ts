@@ -14,7 +14,12 @@ export type UserExportData = {
   }
   readonly accounts: ReadonlyArray<{
     readonly bankName: string
-    readonly accountLast4: string
+    readonly accountLast4: string | null
+    /** The bank's own masked number, when the account was discovered from an
+     *  alert rather than typed. Part of the export because it is data the app
+     *  holds about the person. */
+    readonly accountMask: string | null
+    readonly holderName: string | null
     readonly accountType: string
     readonly captureMethod: string
     readonly balanceKobo: string
@@ -99,6 +104,8 @@ export class PrismaPrivacyRepository implements IPrivacyRepository {
       select: {
         bankName: true,
         accountLast4: true,
+        accountMask: true,
+        holderName: true,
         accountType: true,
         captureMethod: true,
         balanceKobo: true,
@@ -146,6 +153,8 @@ export class PrismaPrivacyRepository implements IPrivacyRepository {
       accounts: accounts.map((a) => ({
         bankName: a.bankName,
         accountLast4: a.accountLast4,
+        accountMask: a.accountMask,
+        holderName: a.holderName,
         accountType: a.accountType,
         captureMethod: a.captureMethod,
         balanceKobo: a.balanceKobo.toString(),

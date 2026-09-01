@@ -63,7 +63,7 @@ export type GeminiProviderDeps = {
   readonly model?: string | undefined
 }
 
-type GeminiAction = 'categorize' | 'insight' | 'pattern'
+type GeminiAction = 'categorize' | 'insight' | 'pattern' | 'complete'
 
 export class GeminiProvider implements IAIProvider {
   public readonly providerName = 'gemini'
@@ -106,6 +106,7 @@ export class GeminiProvider implements IAIProvider {
           return JSON.stringify({ category: 'uncategorised', confidence: 0 })
         }
         if (action === 'pattern') return '{}'
+        if (action === 'complete') return ''
         return 'Could not generate AI insights at this time. This is a spending summary, not financial advice.'
       },
     )
@@ -136,7 +137,7 @@ export class GeminiProvider implements IAIProvider {
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
         generationConfig: {
           temperature: 0.1,
-          ...(action === 'categorize' || action === 'pattern'
+          ...(action === 'categorize' || action === 'pattern' || action === 'complete'
             ? { responseMimeType: 'application/json' }
             : {}),
         },
@@ -207,6 +208,17 @@ Direction: ${direction}`
       return await this.breaker.fire('insight', insightPrompt, insightUserPrompt(reportSummary))
     } catch {
       return 'Could not generate AI insights at this time. This is a spending summary, not financial advice.'
+    }
+  }
+
+  public async complete(systemPrompt: string, userPrompt: string): Promise<string | null> {
+    this.lastError = undefined
+    try {
+      const text = await this.breaker.fire('complete', systemPrompt, userPrompt)
+      return text.length > 0 ? text : null
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err)
+      return null
     }
   }
 

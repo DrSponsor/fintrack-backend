@@ -5,6 +5,12 @@ import { ConnectGmailUseCase } from '../services/connect-gmail.use-case'
 import { DisconnectGmailUseCase } from '../services/disconnect-gmail.use-case'
 import { ProcessGmailWebhookUseCase } from '../services/process-gmail-webhook.use-case'
 import { OAuthService } from '../services/oauth.service'
+import { FetchService } from '../services/fetch.service'
+import { SafetyFilterService } from '../services/safety-filter.service'
+import { AccountDiscoveryService } from '../services/account-discovery.service'
+import { DiscoverAccountsUseCase } from '../services/discover-accounts.use-case'
+import { ConfirmAccountsUseCase } from '../services/confirm-accounts.use-case'
+import { PrismaAccountRepository } from '../../../accounts/repositories/account.repo'
 import { PrismaGmailConnectionRepository } from '../repositories/gmail-connection.repo'
 import { WatchService } from '../services/watch.service'
 import { authenticate, requireUser } from '../../../../core/middleware/authenticate'
@@ -19,6 +25,19 @@ const oauthCallbackBodySchema = z.object({
 
 // Nothing to name: a caller can only disconnect their own inbox.
 const oauthDisconnectBodySchema = z.object({}).strict()
+
+const confirmAccountsBodySchema = z.object({
+  accounts: z
+    .array(
+      z.object({
+        bankName: z.string().min(1).max(100).trim(),
+        accountMask: z.string().min(1).max(64).trim(),
+        holderName: z.string().max(120).trim().nullable().optional(),
+        accountType: z.enum(['CURRENT', 'SAVINGS', 'WALLET']),
+      }),
+    )
+    .max(20, 'Too many accounts confirmed at once'),
+}).strict()
 
 const pubSubPayloadSchema = z.object({
   message: z.object({
@@ -91,6 +110,20 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
 
   const disconnectGmailUseCase = new DisconnectGmailUseCase({
     oauthService,
+  })
+
+  const discoverAccountsUseCase = new DiscoverAccountsUseCase({
+    oauthService,
+    fetchService: new FetchService(fastify.log),
+    safetyFilter: new SafetyFilterService(),
+    discovery: new AccountDiscoveryService({ aiProvider: fastify.ai, logger: fastify.log }),
+    accountRepo: new PrismaAccountRepository(fastify.db.primary),
+    logger: fastify.log,
+  })
+
+  const confirmAccountsUseCase = new ConfirmAccountsUseCase({
+    prisma: fastify.db.primary,
+    logger: fastify.log,
   })
 
   const processGmailWebhookUseCase = new ProcessGmailWebhookUseCase({
@@ -341,6 +374,100 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
       request.log.info({ emailAddress, historyId, queueCount }, 'Processed Pub/Sub webhook and queued history syncs')
 
       return reply.code(202).send(successEnvelope(null, request.requestId))
+    },
+  )
+
+  // ── Account discovery ───────────────────────────────────────────────
+  //
+  // Two endpoints, and the split between them is the privacy design rather
+  // than a REST convention. The scan RETURNS what it found and stores none of
+  // it, because a shared or forwarded inbox can surface another person’s name
+  // and account number. Only what the user ticks reaches the database.
+
+  fastify.get(
+    '/v1/capture/email/discovered-accounts',
+    {
+      preHandler: [authenticate],
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            required: ['success', 'data', 'requestId'],
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['bankName', 'accountMask'],
+                  properties: {
+                    bankName: { type: 'string' },
+                    accountMask: { type: 'string' },
+                    holderName: { type: 'string', nullable: true },
+                  },
+                },
+              },
+              requestId: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const found = await discoverAccountsUseCase.execute(requireUser(request).sub)
+      return reply.code(200).send(successEnvelope(found, request.requestId))
+    },
+  )
+
+  fastify.post(
+    '/v1/capture/email/discovered-accounts/confirm',
+    {
+      preHandler: [authenticate],
+      config: {
+        audit: { action: 'confirm_discovered_accounts', resourceType: 'account' },
+      },
+      schema: {
+        body: {
+          type: 'object',
+          required: ['accounts'],
+          additionalProperties: false,
+          properties: {
+            accounts: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['bankName', 'accountMask', 'accountType'],
+                additionalProperties: false,
+                properties: {
+                  bankName: { type: 'string', minLength: 1, maxLength: 100 },
+                  accountMask: { type: 'string', minLength: 1, maxLength: 64 },
+                  holderName: { type: 'string', nullable: true, maxLength: 120 },
+                  accountType: { type: 'string', enum: ['CURRENT', 'SAVINGS', 'WALLET'] },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const body = confirmAccountsBodySchema.safeParse(request.body)
+      if (!body.success) {
+        const issue = body.error.issues[0]
+        throw validationError(issue?.message ?? 'Validation failed', issue?.path[0]?.toString())
+      }
+
+      const result = await confirmAccountsUseCase.execute(
+        requireUser(request).sub,
+        body.data.accounts.map((a) => ({
+          bankName: a.bankName,
+          accountMask: a.accountMask,
+          holderName: a.holderName ?? null,
+          accountType: a.accountType,
+        })),
+      )
+
+      return reply.code(201).send(successEnvelope(result, request.requestId))
     },
   )
 }

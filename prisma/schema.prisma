@@ -73,7 +73,20 @@ model Account {
   id                  String        @id @default(uuid()) @db.Uuid
   userId              String        @map("user_id") @db.Uuid
   bankName            String        @map("bank_name")
-  accountLast4        String        @map("account_last4")
+  /// The last four digits, when the user typed them. Nullable because a
+  /// DISCOVERED account has only what the bank revealed — Access prints three —
+  /// and padding it to four would invent a digit the bank never gave us, in the
+  /// very field used to decide which account an alert belongs to.
+  accountLast4        String?       @map("account_last4")
+  /// The masked number exactly as the bank prints it, e.g. 012******345.
+  /// Preferred over accountLast4 for display and attribution alike: it is the
+  /// bank's own statement rather than somebody's recollection of it.
+  accountMask         String?       @map("account_mask")
+  /// The account holder as the bank states it. Also the signal that a transfer
+  /// went to the user themselves rather than to another person.
+  holderName          String?       @map("holder_name")
+  verifiedAt          DateTime?     @map("verified_at")
+  verificationSource  AccountVerification @default(SELF_DECLARED) @map("verification_source")
   accountType         AccountType   @map("account_type")
   captureMethod       CaptureMethod @map("capture_method")
   gmailConnected      Boolean       @default(false) @map("gmail_connected")
@@ -392,6 +405,20 @@ enum AccountType {
   CURRENT
   SAVINGS
   WALLET
+}
+
+/// How much the app actually knows about an account belonging to this user.
+///
+/// Neither value is proof of ownership, and the field is a source rather than
+/// a boolean so nothing in the system can claim more certainty than it has.
+/// EMAIL_DISCOVERY says a bank sent an alert naming this account to this
+/// person's connected inbox and the person confirmed it — which a forwarded
+/// alert or a shared family inbox still defeats.
+enum AccountVerification {
+  /// Typed into a form. No evidence at all.
+  SELF_DECLARED
+  /// Found in an alert delivered to the user's inbox, then confirmed by them.
+  EMAIL_DISCOVERY
 }
 
 enum CaptureMethod {
