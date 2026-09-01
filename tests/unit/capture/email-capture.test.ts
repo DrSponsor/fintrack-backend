@@ -155,8 +155,8 @@ describe('DiscoveryService', () => {
     const latestHistoryId = await discovery.syncHistory('account-1', '54321', 'fake-access-token', null)
     expect(latestHistoryId).toBe('98765')
     expect(mockQueue.add).toHaveBeenCalledTimes(2)
-    expect(mockQueue.add).toHaveBeenNthCalledWith(1, 'ingest-message', { accountId: 'account-1', messageId: 'msg-1' }, { jobId: 'email-ingest-account-1-msg-1' })
-    expect(mockQueue.add).toHaveBeenNthCalledWith(2, 'ingest-message', { accountId: 'account-1', messageId: 'msg-2' }, { jobId: 'email-ingest-account-1-msg-2' })
+    expect(mockQueue.add).toHaveBeenNthCalledWith(1, 'ingest-message', { userId: 'account-1', messageId: 'msg-1' }, { jobId: 'email-ingest-account-1-msg-1' })
+    expect(mockQueue.add).toHaveBeenNthCalledWith(2, 'ingest-message', { userId: 'account-1', messageId: 'msg-2' }, { jobId: 'email-ingest-account-1-msg-2' })
 
     fetchSpy.mockRestore()
   })
@@ -193,6 +193,17 @@ describe('EmailIngestWorker', () => {
       prisma: {} as any,
       accountRepo: mockAccountRepo,
       transactionRepo: {} as any,
+      connectionRepo: {
+        findByUserId: vi.fn().mockResolvedValue({
+          id: 'conn-1',
+          userId: 'user-1',
+          emailAddress: 'someone@example.test',
+          tokenEnc: 'enc',
+          historyId: null,
+          watchExpiresAt: null,
+          connectedAt: new Date(),
+        }),
+      } as any,
       emailAccessLogRepo: mockEmailAccessLogRepo,
       oauthService: mockOauthService,
       fetchService: mockFetchService,
@@ -210,7 +221,7 @@ describe('EmailIngestWorker', () => {
 
     const mockJob = {
       name: 'ingest-message',
-      data: { accountId: 'account-1', messageId: 'msg-1' },
+      data: { userId: 'user-1', messageId: 'msg-1' },
       queue: mockQueue,
     } as any
 
@@ -220,7 +231,7 @@ describe('EmailIngestWorker', () => {
     expect(mockQueue.add).toHaveBeenCalledTimes(1)
     expect(mockQueue.add).toHaveBeenCalledWith(
       'ingest-message',
-      { accountId: 'account-1', messageId: 'msg-1' },
+      { userId: 'user-1', messageId: 'msg-1' },
       { delay: 2 * 60 * 60 * 1000, jobId: 'quota-msg-1' },
     )
     // No email was successfully accessed yet (fetch failed) — nothing to log.
@@ -265,6 +276,17 @@ describe('EmailIngestWorker', () => {
           findMatchCandidates: vi.fn().mockResolvedValue([]),
           supersede: vi.fn().mockResolvedValue({ id: 'tx-1' }),
         } as any,
+        connectionRepo: {
+        findByUserId: vi.fn().mockResolvedValue({
+          id: 'conn-1',
+          userId: 'user-1',
+          emailAddress: 'someone@example.test',
+          tokenEnc: 'enc',
+          historyId: null,
+          watchExpiresAt: null,
+          connectedAt: new Date(),
+        }),
+      } as any,
         emailAccessLogRepo: mockEmailAccessLogRepo as any,
         oauthService: { getValidAccessToken: vi.fn().mockResolvedValue('fake-access-token') } as any,
         fetchService: { fetchEmailWithBackoff: vi.fn().mockResolvedValue(baseEmail) } as any,
@@ -302,7 +324,7 @@ describe('EmailIngestWorker', () => {
 
     const mockJob = {
       name: 'ingest-message',
-      data: { accountId: 'account-1', messageId: 'gmail-msg-1' },
+      data: { userId: 'user-1', messageId: 'gmail-msg-1' },
     } as any
 
     it('logs TRANSACTION_CREATED on successful ingestion', async () => {
@@ -510,7 +532,7 @@ describe('EmailIngestWorker', () => {
         const worker = new EmailIngestWorker(deps)
         await (worker as any).processJob({
           name: 'ingest-message',
-          data: { accountId: 'account-1', messageId: 'msg-attribution' },
+          data: { userId: 'user-1', messageId: 'msg-attribution' },
         } as any)
 
         expect(deps.transactionRepo.create).toHaveBeenCalledWith(
@@ -518,14 +540,35 @@ describe('EmailIngestWorker', () => {
         )
       })
 
-      it('keeps the job account when the alert states no account number', async () => {
-        // No opinion means no change. Acting on a mask this codebase has never
-        // seen would be guessing, and a wrong attribution is invisible.
+      it('records nothing when the alert names no account and the user has several', async () => {
+        // There is no job account to fall back on any more, and that is the
+        // fix rather than a gap. Inventing one files money against an account
+        // the bank never named, which is invisible once written: amounts and
+        // monthly totals still look right, and only per-account balances
+        // quietly stop agreeing with the bank.
         const { deps } = makeDeps({ accountRepo: twoAccounts })
         const worker = new EmailIngestWorker(deps)
         await (worker as any).processJob({
           name: 'ingest-message',
-          data: { accountId: 'account-1', messageId: 'msg-no-mask' },
+          data: { userId: 'user-1', messageId: 'msg-no-mask' },
+        } as any)
+
+        expect(deps.transactionRepo.create).not.toHaveBeenCalled()
+      })
+
+      it('records against the only account when the alert names none', async () => {
+        // One account and no stated number is a deduction, not a guess —
+        // there is nothing else the alert could be about. This is the ordinary
+        // case for someone who has connected a single bank.
+        const oneAccount = {
+          findById: vi.fn().mockResolvedValue({ id: 'account-1', userId: 'user-1', accountLast4: '1234' }),
+          findByUserId: vi.fn().mockResolvedValue([{ id: 'account-1', accountLast4: '1234' }]),
+        }
+        const { deps } = makeDeps({ accountRepo: oneAccount })
+        const worker = new EmailIngestWorker(deps)
+        await (worker as any).processJob({
+          name: 'ingest-message',
+          data: { userId: 'user-1', messageId: 'msg-no-mask' },
         } as any)
 
         expect(deps.transactionRepo.create).toHaveBeenCalledWith(
@@ -562,7 +605,7 @@ describe('EmailIngestWorker', () => {
         const worker = new EmailIngestWorker(deps)
         await (worker as any).processJob({
           name: 'ingest-message',
-          data: { accountId: 'account-1', messageId: 'msg-unvalidated' },
+          data: { userId: 'user-1', messageId: 'msg-unvalidated' },
         } as any)
 
         // Both assertions are needed. The AI fallback also yields
@@ -581,7 +624,7 @@ describe('EmailIngestWorker', () => {
         const worker = new EmailIngestWorker(deps)
         await (worker as any).processJob({
           name: 'ingest-message',
-          data: { accountId: 'account-1', messageId: 'msg-validated' },
+          data: { userId: 'user-1', messageId: 'msg-validated' },
         } as any)
 
         expect(deps.transactionRepo.create).toHaveBeenCalledWith(

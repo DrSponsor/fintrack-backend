@@ -9,7 +9,8 @@ import type { EmailAccessOutcome } from '../../../../generated/prisma/enums'
 export type EmailAccessLogRecord = {
   readonly id: string
   readonly userId: string
-  readonly accountId: string
+  /** Null when the email could not be attributed to one. */
+  readonly accountId: string | null
   readonly messageId: string
   readonly senderDomain: string
   readonly subject: string
@@ -19,7 +20,8 @@ export type EmailAccessLogRecord = {
 
 export type CreateEmailAccessLogInput = {
   readonly userId: string
-  readonly accountId: string
+  /** Null when the email could not be attributed to one. */
+  readonly accountId: string | null
   readonly messageId: string
   readonly senderDomain: string
   readonly subject: string

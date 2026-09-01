@@ -5,6 +5,7 @@ import type { PrismaClient } from '../../../../generated/prisma/client'
 import type { IAccountRepository } from '../../../accounts/repositories/account.repo'
 import type { ITransactionRepository, TransactionRecord } from '../../../transactions/repositories/transaction.repo'
 import type { IEmailAccessLogRepository } from '../repositories/email-access-log.repo'
+import type { IGmailConnectionRepository } from '../repositories/gmail-connection.repo'
 import type { OAuthService } from '../services/oauth.service'
 import { GmailQuotaExhaustedError } from '../services/fetch.service'
 import type { FetchService, GmailEmailDetails } from '../services/fetch.service'
@@ -22,8 +23,12 @@ import type { AppLogger } from '../../../../core/logger'
 import { jobId } from '../../../../core/queue/job-id'
 
 export type EmailIngestJobData =
-  | { readonly accountId: string; readonly messageId: string }
-  | { readonly accountId: string; readonly historyId: string }
+  // Addressed to the PERSON, not to one of their accounts. The webhook used to
+  // fan one notification into a job per account, each re-fetching the same
+  // message and each claiming a different account for it. Which account an
+  // alert belongs to is decided by the alert, in account-attribution.ts.
+  | { readonly userId: string; readonly messageId: string }
+  | { readonly userId: string; readonly historyId: string }
 
 export type EmailIngestWorkerDeps = {
   readonly connection: ConnectionOptions
@@ -32,6 +37,7 @@ export type EmailIngestWorkerDeps = {
   readonly accountRepo: IAccountRepository
   readonly transactionRepo: ITransactionRepository
   readonly emailAccessLogRepo: IEmailAccessLogRepository
+  readonly connectionRepo: IGmailConnectionRepository
   readonly oauthService: OAuthService
   readonly fetchService: FetchService
   readonly safetyFilter: SafetyFilterService
@@ -51,6 +57,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
   private readonly accountRepo: IAccountRepository
   private readonly transactionRepo: ITransactionRepository
   private readonly emailAccessLogRepo: IEmailAccessLogRepository
+  private readonly connectionRepo: IGmailConnectionRepository
   private readonly oauthService: OAuthService
   private readonly fetchService: FetchService
   private readonly safetyFilter: SafetyFilterService
@@ -77,6 +84,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     this.accountRepo = deps.accountRepo
     this.transactionRepo = deps.transactionRepo
     this.emailAccessLogRepo = deps.emailAccessLogRepo
+    this.connectionRepo = deps.connectionRepo
     this.oauthService = deps.oauthService
     this.fetchService = deps.fetchService
     this.safetyFilter = deps.safetyFilter
@@ -101,7 +109,9 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
    */
   private async logEmailAccess(
     userId: string,
-    accountId: string,
+    // Null whenever the email could not be attributed — discarded mail, mail
+    // with no transaction, or an alert naming an unregistered account.
+    accountId: string | null,
     messageId: string,
     senderDomain: string,
     subject: string,
@@ -140,12 +150,12 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     placeholder: TransactionRecord,
     context: {
       readonly accountId: string
+      readonly userId: string
       readonly messageId: string
       readonly normalizedName: string
       readonly parsedTx: ParsedTransaction
       readonly isVerified: boolean
       readonly reference: string | undefined
-      readonly account: { readonly userId: string }
       readonly email: GmailEmailDetails
     },
   ): Promise<void> {
@@ -165,7 +175,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       'Bank alert superseded a manually entered transaction',
     )
     await this.logEmailAccess(
-      context.account.userId,
+      context.userId,
       context.accountId,
       context.messageId,
       context.email.senderDomain,
@@ -192,63 +202,62 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     }
 
     if (job.name === 'sync-history') {
-      const { accountId, historyId } = job.data as { accountId: string; historyId: string }
-      
-      const account = await this.accountRepo.findById(accountId)
-      if (account === null) {
-        this.logger.warn({ accountId, historyId }, 'Account not found for history sync job. Aborting.')
-        return
-      }
+      const { userId, historyId } = job.data as { userId: string; historyId: string }
 
-      if (!account.gmailConnected) {
-        this.logger.info({ accountId, historyId }, 'Account Gmail connection is disabled. Skipping.')
+      const connection = await this.connectionRepo.findByUserId(userId)
+      if (connection === null) {
+        this.logger.info({ userId, historyId }, 'No Gmail connection for this user; nothing to sync.')
         return
       }
 
       let accessToken: string
       try {
-        accessToken = await this.oauthService.getValidAccessToken(accountId)
+        accessToken = await this.oauthService.getValidAccessToken(userId)
       } catch (err) {
-        this.logger.error({ err, accountId, historyId }, 'Failed to retrieve Google OAuth access token for history sync')
+        this.logger.error({ err, userId, historyId }, 'Failed to retrieve Google OAuth access token for history sync')
         return
       }
 
+      // Where to resume from is now a property of the PERSON, not of one
+      // account: the inbox carries alerts for all of them, so the newest
+      // transaction across the lot is the honest high-water mark. Taking one
+      // account’s date would re-fetch everything newer on every other account.
+      const owned = await this.accountRepo.findByUserId(userId)
+      const lastTxDate = owned.reduce<Date | null>(
+        (latest, a) =>
+          a.lastTransactionDate !== null && (latest === null || a.lastTransactionDate > latest)
+            ? a.lastTransactionDate
+            : latest,
+        null,
+      )
+
       try {
-        await this.discoveryService.syncHistory(
-          accountId,
-          historyId,
-          accessToken,
-          account.lastTransactionDate,
-        )
+        await this.discoveryService.syncHistory(userId, historyId, accessToken, lastTxDate)
       } catch (err) {
-        this.logger.error({ err, accountId, historyId }, 'Error executing history sync')
+        this.logger.error({ err, userId, historyId }, 'Error executing history sync')
         throw err
       }
       return
     }
 
     // Default job: ingest-message
-    const { accountId, messageId } = job.data as { accountId: string; messageId: string }
+    const { userId, messageId } = job.data as { userId: string; messageId: string }
 
-    // 1. Fetch account and verify Gmail connection is active
-    const account = await this.accountRepo.findById(accountId)
-    if (account === null) {
-      this.logger.warn({ accountId, messageId }, 'Account not found for ingestion job. Aborting.')
-      return
-    }
-
-    if (!account.gmailConnected) {
-      this.logger.info({ accountId, messageId }, 'Account Gmail connection is disabled. Skipping.')
+    // 1. The inbox belongs to the person. WHICH account this particular alert
+    //    concerns is decided further down, from the alert itself.
+    const gmail = await this.connectionRepo.findByUserId(userId)
+    if (gmail === null) {
+      this.logger.info({ userId, messageId }, 'No Gmail connection for this user; nothing to ingest.')
       return
     }
 
     // 2. Refresh / retrieve access token
     let accessToken: string
     try {
-      accessToken = await this.oauthService.getValidAccessToken(accountId)
+      accessToken = await this.oauthService.getValidAccessToken(userId)
     } catch (err) {
-      this.logger.error({ err, accountId, messageId }, 'Failed to retrieve Google OAuth access token for ingestion')
-      return // Token was invalid or revoked, user was marked disconnected.
+      this.logger.error({ err, userId, messageId }, 'Failed to retrieve Google OAuth access token for ingestion')
+      return // Token was invalid or revoked; the connection was removed.
     }
 
     // 3. Fetch message content from Gmail API
@@ -257,7 +266,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       email = await this.fetchService.fetchEmailWithBackoff(messageId, accessToken)
     } catch (err) {
       if (err instanceof GmailQuotaExhaustedError) {
-        this.logger.warn({ messageId, accountId }, 'Gmail API quota limit hit. Deferring job by 2 hours.')
+        this.logger.warn({ messageId, userId }, 'Gmail API quota limit hit. Deferring job by 2 hours.')
         await this.captureEmailQueue.add(
           job.name,
           job.data,
@@ -274,13 +283,13 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     // 4. Run through the Safety Gate filters
     if (this.safetyFilter.shouldDiscard(email.subject, email.bodyText)) {
       this.logger.info({ messageId, subject: email.subject }, 'Email discarded by safety gate (OTP/security keyword)')
-      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DISCARDED_SAFETY_FILTER')
+      await this.logEmailAccess(userId, null, messageId, email.senderDomain, email.subject, 'DISCARDED_SAFETY_FILTER')
       return
     }
 
     if (!this.safetyFilter.hasTransactionKeywords(email.subject, email.bodyText)) {
       this.logger.info({ messageId, subject: email.subject }, 'Email discarded silently (no transaction keywords found)')
-      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DISCARDED_NO_KEYWORDS')
+      await this.logEmailAccess(userId, null, messageId, email.senderDomain, email.subject, 'DISCARDED_NO_KEYWORDS')
       return
     }
 
@@ -330,52 +339,56 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
 
     if (parsedTx === null) {
       this.logger.warn({ messageId, senderDomain: email.senderDomain }, 'Failed to parse transaction from email')
-      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'PARSE_FAILED')
+      await this.logEmailAccess(userId, null, messageId, email.senderDomain, email.subject, 'PARSE_FAILED')
       return
     }
 
-    // 5b. Which account is this alert actually about?
+    // 5b. Which account is this alert about?
     //
-    // The job's accountId is not an answer: the Gmail webhook queues one job
-    // per connected account for the same notification, so N jobs carry the same
-    // message under N different account ids, and global deduplication means the
-    // first worker to finish decides where the row lands. That is a race, not
-    // an attribution. See account-attribution.ts.
+    // There is no longer a job account to fall back to, and that is the point.
+    // The job used to name one, but the webhook queued a job per connected
+    // account for the same notification, so the account on the job was
+    // whichever worker won a race rather than an answer about the money.
     //
-    // Deliberately phased. A confirmed match is applied, because that is the
-    // fix. Everything else keeps the previous behaviour, because the masking
-    // format has exactly one sample in this codebase and that sample was
-    // replaced during a PII sweep — acting destructively on an unverified
-    // format is how nine parsers came to assert one nobody had checked. The
-    // uncertain cases are made loud instead, and tighten once a real mask has
-    // been confirmed against a live alert.
-    const ownedAccounts = await this.accountRepo.findByUserId(account.userId)
-    const attribution = attributeByMask(parsedTx.accountMask, ownedAccounts)
-    let resolvedAccountId = accountId
+    // The alert states its own account number, so that is what decides. See
+    // account-attribution.ts for why the match is on trailing digits rather
+    // than on a mask format nobody has verified.
+    const owned = await this.accountRepo.findByUserId(userId)
+    const attribution = attributeByMask(parsedTx.accountMask, owned)
+
+    let resolvedAccountId: string | null = null
 
     if (attribution.kind === 'matched') {
-      if (attribution.accountId !== accountId) {
-        this.logger.info(
-          { messageId, jobAccountId: accountId, resolvedAccountId: attribution.accountId },
-          'Alert re-attributed from the job’s account to the one the bank named',
-        )
-      }
       resolvedAccountId = attribution.accountId
-    } else if (attribution.kind === 'ambiguous') {
+    } else if (owned.length === 1 && attribution.kind === 'no-opinion') {
+      // The bank named no account and the user has exactly one. There is
+      // nothing else it could be, so this is a deduction rather than a guess.
+      const only = owned[0]
+      resolvedAccountId = only === undefined ? null : only.id
+    }
+
+    if (resolvedAccountId === null) {
+      // Everything else is unplaceable, and unplaceable must not become
+      // “put it somewhere”. Filing money against an account the bank did not
+      // name is invisible once written — amounts and monthly totals still
+      // look right, and only per-account balances quietly stop agreeing with
+      // the bank. A missing row is visible and recoverable; a misfiled one is
+      // neither.
+      //
+      // An ‘unknown’ here is the discovery signal: the user receives alerts
+      // for a bank account they have not registered yet.
       this.logger.warn(
-        { messageId, candidates: attribution.accountIds },
-        'Two accounts share the digits this alert revealed; leaving attribution as the job set it',
+        {
+          messageId,
+          userId,
+          senderDomain: email.senderDomain,
+          reason: attribution.kind,
+          accounts: owned.length,
+        },
+        'Could not tell which account this alert is about; not recorded',
       )
-    } else if (attribution.kind === 'unknown') {
-      // The user receives alerts for a bank account they have not registered.
-      // Today this still files under the job's account, which is wrong — but
-      // skipping the write on an unverified format risks dropping every
-      // transaction, which is worse. This log is what the discovery flow turns
-      // into an offer to add the account.
-      this.logger.warn(
-        { messageId, senderDomain: email.senderDomain, filedUnder: accountId },
-        'Alert names an account this user has not registered; filed under the job’s account for now',
-      )
+      await this.logEmailAccess(userId, null, messageId, email.senderDomain, email.subject, 'PARSE_FAILED')
+      return
     }
 
     // 6. Normalization
@@ -392,7 +405,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     const alreadyIngested = await this.transactionRepo.findByIdempotencyKey(messageId)
     if (alreadyIngested !== null) {
       this.logger.info({ messageId, transactionId: alreadyIngested.id }, 'Message already ingested; skipping')
-      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
+      await this.logEmailAccess(userId, resolvedAccountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
       return
     }
 
@@ -431,13 +444,13 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
           // message id, still resolves here.
           if (same.source === 'MANUAL') {
             await this.supersedePlaceholder(same, {
-              accountId,
+              accountId: resolvedAccountId,
               messageId,
               normalizedName,
               parsedTx,
               isVerified,
               reference: trustedReference,
-              account,
+              userId,
               email,
             })
             return
@@ -447,7 +460,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
             { messageId, existingId: same.id, reference: trustedReference },
             'Bank reference already recorded; not creating a second row',
           )
-          await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
+          await this.logEmailAccess(userId, resolvedAccountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
           return
         }
       }
@@ -494,7 +507,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
         { messageId, existingId: verdict.candidate.id, reason: verdict.reason },
         'Transaction already in the ledger; not creating a second row',
       )
-      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
+      await this.logEmailAccess(userId, resolvedAccountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
       return
     }
 
@@ -505,13 +518,13 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       }
 
       await this.supersedePlaceholder(placeholder, {
-        accountId,
+        accountId: resolvedAccountId,
         messageId,
         normalizedName,
         parsedTx,
         isVerified,
         reference: trustedReference,
-        account,
+        userId,
         email,
       })
       return
@@ -530,14 +543,14 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
 
     // Load user tier to compute category
     const user = await this.prisma.user.findUnique({
-      where: { id: account.userId },
+      where: { id: userId },
       select: { tier: true },
     })
     const userTier = user?.tier ?? 'FREE'
 
     // 8. Categorization
     const categoryId = await this.categorizer.categorize(
-      account.userId,
+      userId,
       userTier,
       normalizedName,
       parsedTx.amountKobo,
@@ -567,7 +580,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
         { messageId, transactionId: transaction.id, senderDomain: email.senderDomain },
         'Email transaction successfully ingested',
       )
-      await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'TRANSACTION_CREATED')
+      await this.logEmailAccess(userId, resolvedAccountId, messageId, email.senderDomain, email.subject, 'TRANSACTION_CREATED')
 
       // Is this one half of money the user moved between their own accounts?
       //
@@ -579,8 +592,8 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       try {
         await this.transferMatcher.evaluate({
           id: transaction.id,
-          userId: account.userId,
-          accountId,
+          userId: userId,
+          accountId: resolvedAccountId,
           amountKobo: parsedTx.amountKobo,
           type: parsedTx.type,
           transactionDate: parsedTx.transactionDate,
@@ -592,7 +605,7 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       if (err && typeof err === 'object' && 'code' in err && (err as { code?: unknown }).code === 'P2002') {
         // Unique key constraint violation: transaction was already written concurrently
         this.logger.info({ messageId }, 'Deduplicated transaction at database layer (unique idempotencyKey)')
-        await this.logEmailAccess(account.userId, accountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
+        await this.logEmailAccess(userId, resolvedAccountId, messageId, email.senderDomain, email.subject, 'DUPLICATE_SUPPRESSED')
         return
       }
       throw err

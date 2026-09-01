@@ -31,13 +31,13 @@ export class DiscoveryService {
   }
 
   public async syncHistory(
-    accountId: string,
+    userId: string,
     startHistoryId: string,
     accessToken: string,
     lastTxDate: Date | null,
   ): Promise<string | null> {
     try {
-      return await this.fetchHistory(accountId, startHistoryId, accessToken)
+      return await this.fetchHistory(userId, startHistoryId, accessToken)
     } catch (err) {
       // If history expired (Google returns 400 or 404 for stale historyId)
       if (
@@ -45,17 +45,17 @@ export class DiscoveryService {
         (err.statusCode === 400 || err.statusCode === 404)
       ) {
         this.logger.warn(
-          { accountId, startHistoryId },
+          { userId, startHistoryId },
           'Gmail history ID expired or invalid. Falling back to message list discovery.',
         )
-        return await this.fallbackListMessages(accountId, accessToken, lastTxDate)
+        return await this.fallbackListMessages(userId, accessToken, lastTxDate)
       }
       throw err
     }
   }
 
   private async fetchHistory(
-    accountId: string,
+    userId: string,
     startHistoryId: string,
     accessToken: string,
   ): Promise<string | null> {
@@ -121,15 +121,15 @@ export class DiscoveryService {
     } while (pageToken)
 
     if (messageIds.size > 0) {
-      this.logger.info({ accountId, count: messageIds.size }, 'Discovered new messages via history sync. Queueing ingestion jobs.')
-      await this.queueJobs(accountId, Array.from(messageIds))
+      this.logger.info({ userId, count: messageIds.size }, 'Discovered new messages via history sync. Queueing ingestion jobs.')
+      await this.queueJobs(userId, Array.from(messageIds))
     }
 
     return latestHistoryId
   }
 
   private async fallbackListMessages(
-    accountId: string,
+    userId: string,
     accessToken: string,
     lastTxDate: Date | null,
   ): Promise<string | null> {
@@ -201,10 +201,10 @@ export class DiscoveryService {
 
     if (messageIds.size > 0) {
       this.logger.info(
-        { accountId, count: messageIds.size, query },
+        { userId, count: messageIds.size, query },
         'Discovered new messages via fallback list. Queueing ingestion jobs.',
       )
-      await this.queueJobs(accountId, Array.from(messageIds))
+      await this.queueJobs(userId, Array.from(messageIds))
     }
 
     // Since we did a full list, get the latest historyId by querying the user profile
@@ -220,13 +220,13 @@ export class DiscoveryService {
     return null
   }
 
-  private async queueJobs(accountId: string, messageIds: readonly string[]): Promise<void> {
+  private async queueJobs(userId: string, messageIds: readonly string[]): Promise<void> {
     for (const messageId of messageIds) {
       await this.queue.add(
         'ingest-message',
-        { accountId, messageId },
+        { userId, messageId },
         {
-          jobId: jobId('email-ingest', accountId, messageId), // Deduplicate
+          jobId: jobId('email-ingest', userId, messageId), // Deduplicate
         },
       )
     }

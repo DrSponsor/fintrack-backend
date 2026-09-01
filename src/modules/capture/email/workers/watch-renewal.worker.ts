@@ -2,7 +2,7 @@ import type { ConnectionOptions, Job } from 'bullmq'
 import { BaseWorker } from '../../../../core/queue/base-worker'
 import { QUEUE_NAMES } from '../../../../core/queue/queues'
 import type { PrismaClient } from '../../../../generated/prisma/client'
-import type { IAccountRepository } from '../../../accounts/repositories/account.repo'
+import type { IGmailConnectionRepository } from '../repositories/gmail-connection.repo'
 import type { OAuthService } from '../services/oauth.service'
 import type { WatchService } from '../services/watch.service'
 import type { AppLogger } from '../../../../core/logger'
@@ -11,7 +11,7 @@ export type WatchRenewalWorkerDeps = {
   readonly connection: ConnectionOptions
   readonly concurrency: number
   readonly prisma: PrismaClient
-  readonly accountRepo: IAccountRepository
+  readonly connectionRepo: IGmailConnectionRepository
   readonly oauthService: OAuthService
   readonly watchService: WatchService
   readonly logger: AppLogger
@@ -19,7 +19,7 @@ export type WatchRenewalWorkerDeps = {
 
 export class WatchRenewalWorker extends BaseWorker<void, void> {
   private readonly prisma: PrismaClient
-  private readonly accountRepo: IAccountRepository
+  private readonly connectionRepo: IGmailConnectionRepository
   private readonly oauthService: OAuthService
   private readonly watchService: WatchService
   private readonly logger: AppLogger
@@ -34,7 +34,7 @@ export class WatchRenewalWorker extends BaseWorker<void, void> {
     })
 
     this.prisma = deps.prisma
-    this.accountRepo = deps.accountRepo
+    this.connectionRepo = deps.connectionRepo
     this.oauthService = deps.oauthService
     this.watchService = deps.watchService
     this.logger = deps.logger
@@ -45,32 +45,42 @@ export class WatchRenewalWorker extends BaseWorker<void, void> {
     await this.renewAllWatches()
   }
 
+  /**
+   * Renews the watches that are actually near lapsing.
+   *
+   * Two things were wrong before. It renewed EVERY connected account on every
+   * cycle, so a user with three accounts on one mailbox re-registered the same
+   * watch three times against a Google quota. And it addressed the watch to
+   * User.email — the signup address — rather than the mailbox actually
+   * authorised, so anyone who connected a different Gmail had their watch
+   * registered against an address they had never granted access to.
+   *
+   * Now: one row per inbox, only those expiring, addressed to the mailbox
+   * Google named.
+   */
   public async renewAllWatches(): Promise<void> {
-    const connectedAccounts = await this.accountRepo.findConnectedGmailAccounts()
-    this.logger.info({ count: connectedAccounts.length }, 'Found active connected Gmail accounts to renew')
+    // A day of headroom. Gmail watches last seven days and this runs daily, so
+    // renewing a day early means a missed cycle is survivable rather than a
+    // silent gap in capture.
+    const renewBefore = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    const due = await this.connectionRepo.findExpiringWatches(renewBefore)
+    this.logger.info({ count: due.length }, 'Gmail watches due for renewal')
 
     // Concurrency control helper (limit to 5 parallel requests)
     const limit = 5
-    const tasks = connectedAccounts.map((account): (() => Promise<void>) => async () => {
+    const tasks = due.map((gmail): (() => Promise<void>) => async () => {
       try {
-        const user = await this.prisma.user.findUnique({
-          where: { id: account.userId },
-          select: { email: true },
-        })
-        const email = user?.email ?? 'unknown@fintrack.com'
-
-        const accessToken = await this.oauthService.getValidAccessToken(account.id)
-        await this.watchService.setUpWatch(email, accessToken)
-
-        this.logger.info(
-          { accountId: account.id, email },
-          'Gmail watch successfully renewed for account',
+        const accessToken = await this.oauthService.getValidAccessToken(gmail.userId)
+        const watch = await this.watchService.setUpWatch(gmail.emailAddress, accessToken)
+        await this.connectionRepo.saveWatch(
+          gmail.userId,
+          watch.historyId,
+          new Date(Number(watch.expiration)),
         )
+
+        this.logger.info({ userId: gmail.userId }, 'Gmail watch renewed')
       } catch (err) {
-        this.logger.error(
-          { accountId: account.id, err },
-          'Failed to renew Gmail watch for account during batch cycle',
-        )
+        this.logger.error({ userId: gmail.userId, err }, 'Failed to renew Gmail watch')
       }
     })
 

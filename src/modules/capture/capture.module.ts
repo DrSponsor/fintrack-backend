@@ -6,6 +6,7 @@ import { PrismaAccountRepository } from '../accounts/repositories/account.repo'
 import { PrismaTransactionRepository } from '../transactions/repositories/transaction.repo'
 import { PrismaCategorizationRepository } from '../transactions/repositories/categorization.repo'
 import { PrismaEmailAccessLogRepository } from './email/repositories/email-access-log.repo'
+import { PrismaGmailConnectionRepository } from './email/repositories/gmail-connection.repo'
 import { OAuthService } from './email/services/oauth.service'
 import { FetchService } from './email/services/fetch.service'
 import { SafetyFilterService } from './email/services/safety-filter.service'
@@ -48,7 +49,8 @@ const captureModule: AppFastifyPluginAsync = async (fastify) => {
   const transactionRepo = new PrismaTransactionRepository(fastify.db.primary)
   const mappingRepo = new PrismaCategorizationRepository(fastify.db.primary)
   const emailAccessLogRepo = new PrismaEmailAccessLogRepository(fastify.db.primary)
-  const oauthService = new OAuthService(fastify.appConfig, accountRepo, logger)
+  const connectionRepo = new PrismaGmailConnectionRepository(fastify.db.primary)
+  const oauthService = new OAuthService(fastify.appConfig, connectionRepo, logger)
   const fetchService = new FetchService(logger)
   const safetyFilter = new SafetyFilterService()
 
@@ -92,6 +94,7 @@ const captureModule: AppFastifyPluginAsync = async (fastify) => {
       accountRepo,
       transactionRepo,
       emailAccessLogRepo,
+      connectionRepo,
       oauthService,
       fetchService,
       safetyFilter,
@@ -112,7 +115,7 @@ const captureModule: AppFastifyPluginAsync = async (fastify) => {
       connection,
       concurrency: 1,
       prisma: fastify.db.primary,
-      accountRepo,
+      connectionRepo,
       oauthService,
       watchService,
       logger,

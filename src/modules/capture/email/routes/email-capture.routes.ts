@@ -5,20 +5,20 @@ import { ConnectGmailUseCase } from '../services/connect-gmail.use-case'
 import { DisconnectGmailUseCase } from '../services/disconnect-gmail.use-case'
 import { ProcessGmailWebhookUseCase } from '../services/process-gmail-webhook.use-case'
 import { OAuthService } from '../services/oauth.service'
+import { PrismaGmailConnectionRepository } from '../repositories/gmail-connection.repo'
 import { WatchService } from '../services/watch.service'
-import { PrismaAccountRepository } from '../../../accounts/repositories/account.repo'
 import { authenticate, requireUser } from '../../../../core/middleware/authenticate'
 import { successEnvelope } from '../../../../core/http/envelope'
 import { validationError } from '../../../../core/errors/factories'
 
+// No accountId. The inbox is connected to the PERSON, and the accounts are
+// what the app then finds inside it — which is the whole point of the change.
 const oauthCallbackBodySchema = z.object({
-  accountId: z.string().uuid('Invalid account ID'),
   code: z.string().min(1, 'Authorization code is required'),
 }).strict()
 
-const oauthDisconnectBodySchema = z.object({
-  accountId: z.string().uuid('Invalid account ID'),
-}).strict()
+// Nothing to name: a caller can only disconnect their own inbox.
+const oauthDisconnectBodySchema = z.object({}).strict()
 
 const pubSubPayloadSchema = z.object({
   message: z.object({
@@ -77,25 +77,26 @@ function page(body: string): string {
 }
 
 export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
-  const accountRepo = new PrismaAccountRepository(fastify.db.primary)
-  const oauthService = new OAuthService(fastify.appConfig, accountRepo, fastify.log)
+  const connectionRepo = new PrismaGmailConnectionRepository(fastify.db.primary)
+  const oauthService = new OAuthService(fastify.appConfig, connectionRepo, fastify.log)
   const watchService = new WatchService(fastify.appConfig, fastify.log)
 
   const connectGmailUseCase = new ConnectGmailUseCase({
-    accountRepo,
+    connectionRepo,
     oauthService,
     watchService,
     captureEmailQueue: fastify.queues.captureEmail,
+    logger: fastify.log,
   })
 
   const disconnectGmailUseCase = new DisconnectGmailUseCase({
-    accountRepo,
     oauthService,
   })
 
   const processGmailWebhookUseCase = new ProcessGmailWebhookUseCase({
-    prisma: fastify.db.primary,
+    connectionRepo,
     captureEmailQueue: fastify.queues.captureEmail,
+    logger: fastify.log,
   })
 
   // 0a. Consent URL — the entry point to the whole flow.
@@ -193,9 +194,8 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['accountId', 'code'],
+          required: ['code'],
           properties: {
-            accountId: { type: 'string', format: 'uuid' },
             code: { type: 'string', minLength: 1 },
           },
         },
@@ -226,8 +226,8 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
         throw validationError(parsed.error.issues[0]?.message ?? 'Invalid request body')
       }
 
-      const { accountId, code } = parsed.data
-      const { email } = await connectGmailUseCase.execute(requireUser(request).sub, accountId, code)
+      const { code } = parsed.data
+      const { email } = await connectGmailUseCase.execute(requireUser(request).sub, code)
 
       return reply.code(200).send(successEnvelope({ email }, request.requestId))
     },
@@ -242,10 +242,7 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['accountId'],
-          properties: {
-            accountId: { type: 'string', format: 'uuid' },
-          },
+          properties: {},
         },
         response: {
           200: {
@@ -267,8 +264,7 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
         throw validationError(parsed.error.issues[0]?.message ?? 'Invalid request body')
       }
 
-      const { accountId } = parsed.data
-      await disconnectGmailUseCase.execute(requireUser(request).sub, accountId)
+      await disconnectGmailUseCase.execute(requireUser(request).sub)
 
       return reply.code(200).send(successEnvelope(null, request.requestId))
     },

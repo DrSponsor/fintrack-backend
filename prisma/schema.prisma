@@ -26,8 +26,47 @@ model User {
   deviceTokens           DeviceToken[]
   notificationPreference NotificationPreference?
   emailAccessLogs        EmailAccessLog[]
+  gmailConnection        GmailConnection?
 
   @@map("users")
+}
+
+/// One connected inbox, belonging to a PERSON.
+///
+/// This used to live on Account — gmail_connected and gmail_token_enc — which
+/// was backwards in three ways. A user with three accounts alerting to one
+/// Gmail stored the same refresh token three times, so revoking was three
+/// writes that could half-fail. The webhook fanned out one notification into
+/// one job per account, multiplying Gmail quota and parsing by the number of
+/// accounts. And an account had to EXIST before its inbox could be connected,
+/// which forced someone to type a bank name and four digits before the app had
+/// any way to check them — the exact step account discovery exists to remove.
+///
+/// An inbox belongs to a person. Their accounts are discovered from it.
+model GmailConnection {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @map("user_id") @db.Uuid
+
+  /// The Gmail address actually authorised, which need NOT be the address the
+  /// user signed up with. The webhook resolves by this field; resolving by
+  /// User.email silently missed anyone who connected a different mailbox.
+  emailAddress String @map("email_address")
+
+  /// Encrypted refresh token. Never logged — see core/logger/redact.ts.
+  tokenEnc String @map("token_enc")
+
+  /// Gmail history cursor, so a sync resumes rather than re-reading.
+  historyId String? @map("history_id")
+
+  /// Gmail watches expire after seven days and are renewed by a worker.
+  watchExpiresAt DateTime? @map("watch_expires_at")
+
+  connectedAt DateTime @default(now()) @map("connected_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([emailAddress])
+  @@map("gmail_connections")
 }
 
 model Account {
@@ -268,7 +307,14 @@ model AuditLog {
 model EmailAccessLog {
   id           String             @id @default(uuid()) @db.Uuid
   userId       String             @map("user_id") @db.Uuid
-  accountId    String             @map("account_id") @db.Uuid
+  /// Which account the email turned out to concern, when that is knowable.
+  /// Null when the app read an email and could not attribute it — mail the
+  /// safety gate discarded, mail with no transaction in it, and alerts naming
+  /// an account the user has not registered. Access is per-INBOX now, so the
+  /// account is incidental to the record; making it mandatory would mean
+  /// inventing an attribution to satisfy a constraint, in a table whose whole
+  /// purpose is to tell the user truthfully what was read.
+  accountId    String?            @map("account_id") @db.Uuid
   messageId    String             @map("message_id")
   senderDomain String             @map("sender_domain")
   subject      String
@@ -276,7 +322,7 @@ model EmailAccessLog {
   accessedAt   DateTime           @default(now()) @map("accessed_at")
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@index([userId, accessedAt])
   @@map("email_access_logs")

@@ -1,6 +1,6 @@
 import CircuitBreaker from 'opossum'
 import type { AppConfig } from '../../../../config'
-import type { IAccountRepository } from '../../../accounts/repositories/account.repo'
+import type { IGmailConnectionRepository } from '../repositories/gmail-connection.repo'
 import { decryptField, encryptField, decodeFieldEncryptionKey } from '../../../../core/crypto/encryption'
 import type { AppLogger } from '../../../../core/logger'
 import { AppError } from '../../../../core/errors/AppError'
@@ -15,14 +15,14 @@ export type GmailTokenPayload = {
 
 export class OAuthService {
   private readonly config: AppConfig
-  private readonly accountRepo: IAccountRepository
+  private readonly connectionRepo: IGmailConnectionRepository
   private readonly logger: AppLogger
   private readonly encryptionKey: Buffer
   private readonly breaker: CircuitBreaker<[string, RequestInit], Response>
 
-  public constructor(config: AppConfig, accountRepo: IAccountRepository, logger: AppLogger) {
+  public constructor(config: AppConfig, connectionRepo: IGmailConnectionRepository, logger: AppLogger) {
     this.config = config
-    this.accountRepo = accountRepo
+    this.connectionRepo = connectionRepo
     this.logger = logger
     this.encryptionKey = decodeFieldEncryptionKey(config.fieldEncryptionKeyBase64)
 
@@ -70,7 +70,7 @@ export class OAuthService {
       `state=${encodeURIComponent(state)}`
   }
 
-  public async exchangeCodeAndSave(accountId: string, code: string): Promise<{ readonly email: string }> {
+  public async exchangeCodeAndSave(userId: string, code: string): Promise<{ readonly email: string }> {
     const clientId = this.config.googleClientId
     const clientSecret = this.config.googleClientSecret
     const redirectUri = this.config.googleRedirectUri
@@ -133,7 +133,8 @@ export class OAuthService {
     }
 
     // Keep existing refresh token if Google didn't return a new one (e.g. on reconnect without full consent screen bypass)
-    const existingTokenEnc = await this.accountRepo.getGmailToken(accountId)
+    const existing = await this.connectionRepo.findByUserId(userId)
+    const existingTokenEnc = existing?.tokenEnc ?? null
     let existingRefreshToken: string | null = null
     if (existingTokenEnc) {
       try {
@@ -141,7 +142,7 @@ export class OAuthService {
         const parsed = JSON.parse(decrypted) as GmailTokenPayload
         existingRefreshToken = parsed.refreshToken
       } catch (err) {
-        this.logger.warn({ accountId, err }, 'Failed to decrypt or parse existing tokens during code exchange')
+        this.logger.warn({ userId, err }, 'Failed to decrypt or parse existing tokens during code exchange')
       }
     }
 
@@ -157,13 +158,15 @@ export class OAuthService {
     }
 
     const encrypted = encryptField(JSON.stringify(payload), this.encryptionKey)
-    await this.accountRepo.updateGmailToken(accountId, encrypted, true)
+    // The address Google authorised, not the one the user signed up with.
+    await this.connectionRepo.upsert({ userId, emailAddress: email, tokenEnc: encrypted })
 
     return { email }
   }
 
-  public async getValidAccessToken(accountId: string): Promise<string> {
-    const tokenEnc = await this.accountRepo.getGmailToken(accountId)
+  public async getValidAccessToken(userId: string): Promise<string> {
+    const connection = await this.connectionRepo.findByUserId(userId)
+    const tokenEnc = connection?.tokenEnc ?? null
     if (!tokenEnc) {
       throw tokenRevoked('Gmail connection has not been set up or was disconnected')
     }
@@ -173,7 +176,7 @@ export class OAuthService {
       const decrypted = decryptField(tokenEnc, this.encryptionKey)
       payload = JSON.parse(decrypted) as GmailTokenPayload
     } catch (err) {
-      this.logger.error({ accountId, err }, 'Failed to decrypt or parse stored Gmail tokens')
+      this.logger.error({ userId, err }, 'Failed to decrypt or parse stored Gmail tokens')
       throw tokenRevoked('Failed to decrypt stored credentials')
     }
 
@@ -210,12 +213,12 @@ export class OAuthService {
         }),
       })
     } catch (err: unknown) {
-      this.logger.error({ err, accountId }, 'Google OAuth token refresh failed or timed out')
+      this.logger.error({ err, userId }, 'Google OAuth token refresh failed or timed out')
 
-      // If the token was revoked or is invalid, mark the account as disconnected
+      // Revoked or invalid: the grant is gone, so the row goes with it.
       const message = err instanceof Error ? err.message : ''
       if (message.includes('[400]') || message.includes('[401]')) {
-        await this.accountRepo.updateGmailToken(accountId, null, false)
+        await this.connectionRepo.remove(userId)
         throw tokenRevoked('Gmail connection was revoked by the user or has expired')
       }
 
@@ -247,13 +250,17 @@ export class OAuthService {
     }
 
     const encrypted = encryptField(JSON.stringify(updatedPayload), this.encryptionKey)
-    await this.accountRepo.updateGmailToken(accountId, encrypted, true)
+    // saveToken, not upsert: Google rotates the refresh token routinely, and
+    // upsert would clear the sync cursor and turn every rotation into a full
+    // re-scan of the mailbox.
+    await this.connectionRepo.saveToken(userId, encrypted)
 
     return newAccessToken
   }
 
-  public async disconnect(accountId: string): Promise<void> {
-    const tokenEnc = await this.accountRepo.getGmailToken(accountId)
+  public async disconnect(userId: string): Promise<void> {
+    const connection = await this.connectionRepo.findByUserId(userId)
+    const tokenEnc = connection?.tokenEnc ?? null
     if (tokenEnc) {
       try {
         const decrypted = decryptField(tokenEnc, this.encryptionKey)
@@ -268,13 +275,15 @@ export class OAuthService {
           },
           body: new URLSearchParams({ token: tokenToRevoke }),
         }).catch((err) => {
-          this.logger.warn({ accountId, err }, 'Failed to revoke token on Google servers during disconnect')
+          this.logger.warn({ userId, err }, 'Failed to revoke token on Google servers during disconnect')
         })
       } catch (err) {
-        this.logger.warn({ accountId, err }, 'Error during disconnect token decryption')
+        this.logger.warn({ userId, err }, 'Error during disconnect token decryption')
       }
     }
 
-    await this.accountRepo.updateGmailToken(accountId, null, false)
+    // One delete, whatever the account count. This used to be one write per
+    // connected account, any of which could fail and leave a live token behind.
+    await this.connectionRepo.remove(userId)
   }
 }
