@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  redactForDiscovery,
+  isPlausibleAccountMask,
   checkPattern,
   runPattern,
   verifyExtraction,
@@ -8,6 +10,7 @@ import {
   verifyPatternFields,
   isPlausibleReference,
 } from '../../../src/modules/capture/email/parsers/pattern-safety'
+import { revealedTail } from '../../../src/modules/capture/email/services/account-attribution'
 import { parseAmountKobo } from '../../../src/modules/capture/email/parsers/utils'
 
 /**
@@ -267,5 +270,56 @@ describe('isPlausibleReference', () => {
     // Separators are outside the charset, so a figure can never be mistaken for
     // an identifier.
     expect(isPlausibleReference('1,234.56')).toBe(false)
+  })
+})
+
+describe('redactForDiscovery', () => {
+  // Every account number below is invented.
+
+  it('keeps the last three digits of a number the bank printed in full', () => {
+    // The bug this guards: blanking the whole run was right about the risk and
+    // wrong about the outcome. A bank that prints account numbers in full came
+    // back as '##########', which identifies nothing, so discovery found the
+    // account and then discarded it as implausible.
+    expect(redactForDiscovery('A/C Number 0123456257')).toBe('A/C Number #######257')
+  })
+
+  it('leaves a number the bank already masked exactly as it is', () => {
+    expect(redactForDiscovery('A/C Number 012******345')).toBe('A/C Number 012******345')
+  })
+
+  it('discloses the same amount whichever way the bank writes it', () => {
+    // Both styles converge on three revealed digits, which is the point: the
+    // model never sees more than a masking bank would have printed anyway.
+    const full = redactForDiscovery('0123456257').match(/(\d+)$/)?.[1]
+    const masked = redactForDiscovery('012******345').match(/(\d+)$/)?.[1]
+
+    expect(full).toBe('257')
+    expect(masked).toBe('257')
+  })
+
+  it('never lets a whole account number through', () => {
+    const out = redactForDiscovery('Account 9988776655 was debited')
+
+    expect(out).not.toContain('9988776655')
+    expect(out).toContain('655')
+  })
+
+  it('leaves amounts and short numbers alone', () => {
+    // Amounts carry separators and a decimal, so they are not digit runs; and
+    // a redacted amount would make every discovered alert unreadable.
+    const out = redactForDiscovery('NGN 4,989.25 on 17-Aug-2026')
+
+    expect(out).toContain('4,989.25')
+    expect(out).toContain('2026')
+  })
+
+  it('produces a mask the discovery filter and the matcher both accept', () => {
+    // The two checks that dropped the account: one rejected the shape, the
+    // other found no digits to identify it by.
+    const masked = redactForDiscovery('0123456257')
+
+    expect(isPlausibleAccountMask(masked)).toBe(true)
+    expect(revealedTail(masked)).toBe('257')
   })
 })

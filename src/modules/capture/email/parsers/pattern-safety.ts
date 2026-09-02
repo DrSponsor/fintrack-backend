@@ -420,7 +420,11 @@ export function redactForModel(text: string): string {
 export function isPlausibleAccountMask(value: string): boolean {
   const trimmed = value.trim()
   if (trimmed.length < 4 || trimmed.length > 24) return false
-  if (!/^[0-9*xX•·\- ]+$/.test(trimmed)) return false
+  // '#' is admitted because it is this app's own redaction glyph, and a mask
+  // that reached us through discovery legitimately carries it — the bank
+  // printed the number in full and we masked all but the last three digits
+  // before the model ever saw it.
+  if (!/^[0-9*xX•·#\- ]+$/.test(trimmed)) return false
   return (trimmed.match(/\d/g) ?? []).length >= 2
 }
 
@@ -476,13 +480,37 @@ export function isPlausibleHolderName(value: string): boolean {
  * numbers. A bank that prints the whole account number does not get to leak
  * it just because discovery is running.
  */
+/**
+ * How many trailing digits a full account number keeps when redacted for
+ * discovery.
+ *
+ * Three, because that is what a bank which masks its own alerts reveals —
+ * Access prints `012******345`. Matching that means both kinds of bank
+ * disclose the same amount, and it is the least that still identifies an
+ * account: fewer than three digits collide too often to tell one of a
+ * person's accounts from another.
+ */
+const DISCOVERY_REVEALED_TAIL = 3
+
 export function redactForDiscovery(text: string): string {
   return (
     text
       // Long digit runs, but ONLY where the bank has not already masked them.
       // The negative lookahead lets `012******345` through while still
       // catching a bare `0123456789`.
-      .replace(/\b\d{7,}\b/g, (match) => '#'.repeat(match.length))
+      //
+      // The tail survives on purpose. Blanking the whole run was right about
+      // the risk and wrong about the outcome: a bank that prints its account
+      // numbers in full — Coronation does — came back as `##########`, which
+      // identifies nothing, so discovery found the account and then discarded
+      // it. Keeping three digits sends the model no more than a bank that
+      // masks its own alerts prints anyway.
+      .replace(
+        /\b\d{7,}\b/g,
+        (match) =>
+          '#'.repeat(match.length - DISCOVERY_REVEALED_TAIL) +
+          match.slice(-DISCOVERY_REVEALED_TAIL),
+      )
       .slice(0, MAX_TEXT_LENGTH)
   )
 }

@@ -4,6 +4,7 @@ import {
   isPlausibleAccountMask,
   isPlausibleHolderName,
 } from '../parsers/pattern-safety'
+import { revealedTail } from './account-attribution'
 import type { AppLogger } from '../../../../core/logger'
 
 /**
@@ -67,6 +68,12 @@ export interface IDiscoveryAIProvider {
 export type AccountDiscoveryDeps = {
   readonly aiProvider: IDiscoveryAIProvider
   readonly logger: AppLogger
+}
+
+/** A mask reduced to its SHAPE, so a rejection can be logged without writing
+ *  somebody's account number into a log file. */
+function shapeOf(mask: string): string {
+  return mask.replace(/\d/g, 'N').replace(/[a-z]/gi, 'a').slice(0, 40)
 }
 
 /** Collapses masks that differ only in spacing or masking glyph, so the same
@@ -144,11 +151,38 @@ export class AccountDiscoveryService {
       const accountMask = typeof row.accountMask === 'string' ? row.accountMask.trim() : ''
       const holderRaw = typeof row.holderName === 'string' ? row.holderName.trim() : ''
 
-      if (bankName.length === 0 || bankName.length > 60) continue
-      if (!isPlausibleAccountMask(accountMask)) continue
-      // A '#' is a value that was redacted before the model saw it, so a mask
-      // containing one is the model reporting our own redaction back to us.
-      if (accountMask.includes('#')) continue
+      // Every rejection says WHY. A silent drop here is indistinguishable
+      // from the model finding nothing, and the two need completely different
+      // fixes — which cost a debugging session to learn.
+      const reject = (reason: string): void => {
+        this.logger.warn(
+          { reason, bankName, maskShape: shapeOf(accountMask) },
+          'account discovery candidate rejected',
+        )
+      }
+
+      if (bankName.length === 0 || bankName.length > 60) {
+        reject(bankName.length === 0 ? 'no bank name' : 'bank name too long')
+        continue
+      }
+      if (!isPlausibleAccountMask(accountMask)) {
+        reject('mask is not plausible')
+        continue
+      }
+      // A mask is only worth keeping if it still identifies something. This
+      // used to reject any '#' at all, on the theory that a '#' meant the
+      // model was handing our own redaction back — true when redaction blanked
+      // the whole number, and wrong now that it keeps the last three digits.
+      // Under the old rule every bank that prints account numbers in full was
+      // discovered and then silently dropped.
+      //
+      // The honest test is not which glyph appears but whether any digits
+      // survived, which is exactly what the attribution matcher will later
+      // need to recognise this account by.
+      if (revealedTail(accountMask) === null) {
+        reject('mask reveals no digits to identify an account by')
+        continue
+      }
 
       const key = maskKey(accountMask)
       if (seen.has(key)) continue

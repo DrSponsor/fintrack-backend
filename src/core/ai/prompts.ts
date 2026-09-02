@@ -167,8 +167,8 @@ For each DISTINCT account you find:
   "bankName"     the bank or wallet that sent the alert, as a person would say
                  it — "Access Bank", "Opay", "GTBank", "Kuda". Not a domain.
   "accountMask"  the account number EXACTLY as printed, keeping any masking
-                 characters the bank used. Copy it character for character:
-                 "012******345" stays "012******345".
+                 characters. Copy it character for character: "012******345"
+                 stays "012******345", and "#######257" stays "#######257".
   "holderName"   the account holder as stated in the email, if stated.
 
 Rules:
@@ -176,7 +176,8 @@ Rules:
 - Copy values exactly as they appear. Never reformat, complete, or tidy an account number.
 - If an email does not state an account number, do not invent one — omit that account entirely.
 - If an email does not state a holder name, set "holderName" to null. Do not guess it from the greeting of a different email.
-- Runs of # are numbers that were removed before you saw them. Never return a value containing #.
+- A # stands for a digit that was masked before you saw it. Some banks print an account number in full, so those arrive already masked this way: "#######257". Copy such a value exactly as it appears, # characters included — it is a real account and the visible digits are what identify it.
+- Only reject an account number with NO digits left at all, such as "##########". That one identifies nothing.
 - Return an empty array if no bank account is identifiable.
 
 Accuracy matters more than completeness. A person is shown this list and asked

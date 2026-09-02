@@ -4,6 +4,7 @@ import type { SafetyFilterService } from './safety-filter.service'
 import type { AccountDiscoveryService, DiscoveredAccount } from './account-discovery.service'
 import type { IAccountRepository } from '../../../accounts/repositories/account.repo'
 import { revealedTail } from './account-attribution'
+import { cleanText } from '../parsers/utils'
 import type { AppLogger } from '../../../../core/logger'
 
 /**
@@ -36,6 +37,31 @@ import type { AppLogger } from '../../../../core/logger'
  *  depth: enough to cover several banks, not enough to make connecting slow. */
 const SCAN_LOOKBACK_DAYS = 120
 const SCAN_MAX_MESSAGES = 40
+
+/**
+ * What a bank alert looks like to Gmail's own search.
+ *
+ * Deliberately phrases rather than single words. "credit" alone matches half a
+ * personal inbox — credit cards, course credits, closing credits — and every
+ * one of those costs a fetch that the local keyword filter then throws away.
+ * The sentence a Nigerian bank actually writes is distinctive, and Gmail's
+ * search is far better at finding it than fetching forty recent messages and
+ * hoping.
+ *
+ * OR'd rather than AND'd because banks phrase it differently, and a scan that
+ * misses one bank is worse than one that fetches a few false positives — the
+ * local filter and the model both get another say afterwards.
+ */
+const ALERT_QUERY = [
+  '"has been debited"',
+  '"has been credited"',
+  '"debit alert"',
+  '"credit alert"',
+  '"transaction alert"',
+  '"transaction notification"',
+  '"account statement"',
+  'subject:(debit OR credit OR transaction)',
+].join(' OR ')
 
 export type DiscoverAccountsDeps = {
   readonly oauthService: OAuthService
@@ -86,7 +112,12 @@ export class DiscoverAccountsUseCase {
 
         sources.push({
           subject: email.subject,
-          body: email.bodyText,
+          // The SAME source the parsers read, for the same reason: Access sends
+          // its alert as an HTML table, and the plain-text part is nearly
+          // empty. Passing bodyText alone meant the model was handed a blank
+          // page for every Access email in the inbox — it found nothing and
+          // there was no error to notice, because nothing had gone wrong.
+          body: cleanText(email.bodyHtml || email.bodyText),
           senderDomain: email.senderDomain,
         })
       } catch (err) {
@@ -95,6 +126,14 @@ export class DiscoverAccountsUseCase {
         this.logger.warn({ err, messageId }, 'skipping a message during account discovery')
       }
     }
+
+    // Domains only — enough to tell whether real bank mail reached the model,
+    // without writing anybody’s correspondence into a log file.
+    const domains = [...new Set(sources.map((s) => s.senderDomain))].slice(0, 15)
+    this.logger.info(
+      { listed: messageIds.length, usable: sources.length, domains },
+      'account discovery gathered mail',
+    )
 
     const found = await this.discovery.discover(sources)
     if (found.length === 0) return []
@@ -135,7 +174,20 @@ export class DiscoverAccountsUseCase {
     const dd = String(since.getDate()).padStart(2, '0')
 
     const url = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages')
-    url.searchParams.set('q', `after:${yyyy}/${mm}/${dd}`)
+    // Ask Gmail for bank alerts, not for everything recent.
+    //
+    // This was `after:DATE` alone, which returns the most recent messages of
+    // ANY kind. The ingest path uses the same bare query and gets away with it
+    // because it PAGES through every result until the window is exhausted;
+    // discovery takes the first 40 and stops. In an ordinary inbox those forty
+    // are newsletters and app notifications, every one of them dropped by the
+    // keyword filter below — so the scan reported "no accounts found" on a
+    // mailbox that demonstrably contains bank alerts.
+    //
+    // Filtering server-side also means the 40 fetches are spent on plausible
+    // alerts rather than on mail that will be discarded locally, which is what
+    // makes a bounded scan worth doing at all.
+    url.searchParams.set('q', `after:${yyyy}/${mm}/${dd} ${ALERT_QUERY}`)
     url.searchParams.set('maxResults', String(SCAN_MAX_MESSAGES))
 
     const response = await fetch(url.toString(), {
