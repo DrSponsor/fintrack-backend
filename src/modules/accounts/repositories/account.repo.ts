@@ -14,6 +14,7 @@ export type AccountRecord = {
   /** The bank's own masked number, when the account was discovered. */
   readonly accountMask: string | null
   readonly holderName: string | null
+  readonly verificationSource: 'SELF_DECLARED' | 'EMAIL_DISCOVERY'
   readonly accountType: string
   readonly captureMethod: string
   readonly gmailConnected: boolean
@@ -61,6 +62,7 @@ const SELECT_FIELDS = {
   accountLast4: true,
   accountMask: true,
   holderName: true,
+  verificationSource: true,
   accountType: true,
   captureMethod: true,
   gmailConnected: true,
@@ -75,6 +77,7 @@ type PrismaAccountRow = {
   accountLast4: string | null
   accountMask: string | null
   holderName: string | null
+  verificationSource: 'SELF_DECLARED' | 'EMAIL_DISCOVERY'
   accountType: string
   captureMethod: string
   gmailConnected: boolean
@@ -90,6 +93,7 @@ function toDomain(row: PrismaAccountRow): AccountRecord {
     accountLast4: row.accountLast4,
     accountMask: row.accountMask,
     holderName: row.holderName,
+    verificationSource: row.verificationSource,
     accountType: row.accountType,
     captureMethod: row.captureMethod,
     gmailConnected: row.gmailConnected,

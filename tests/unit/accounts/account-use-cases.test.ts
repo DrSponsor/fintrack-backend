@@ -32,6 +32,7 @@ function makeAccount(overrides: Partial<AccountRecord> = {}): AccountRecord {
     bankName: 'Access Bank',
     accountMask: null,
     holderName: null,
+    verificationSource: 'SELF_DECLARED' as const,
     accountLast4: '4321',
     accountType: 'CURRENT',
     captureMethod: 'MANUAL',

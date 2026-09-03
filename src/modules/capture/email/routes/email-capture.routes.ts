@@ -266,6 +266,60 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
     },
   )
 
+  // 1b. Is an inbox connected, and which one?
+  //
+  // Settings needs this and had no cheap way to ask. The only existing signal
+  // was the discovery scan, which fetches forty messages and calls a model —
+  // half a minute of work to answer a yes/no question, and it would run every
+  // time somebody opened a settings screen.
+  //
+  // The address is returned because it is the one thing a person needs to
+  // check: they authorised a mailbox, quite possibly not the one they signed
+  // up with, and being told WHICH is what makes disconnecting a safe decision
+  // rather than a guess.
+  fastify.get(
+    '/v1/capture/email/connection',
+    {
+      preHandler: [authenticate],
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['success', 'data', 'requestId'],
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['connected'],
+                properties: {
+                  connected: { type: 'boolean' },
+                  emailAddress: { type: 'string', nullable: true },
+                  connectedAt: { type: 'string', format: 'date-time', nullable: true },
+                },
+              },
+              requestId: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const connection = await connectionRepo.findByUserId(requireUser(request).sub)
+      return reply.code(200).send(
+        successEnvelope(
+          {
+            connected: connection !== null,
+            emailAddress: connection?.emailAddress ?? null,
+            connectedAt: connection?.connectedAt.toISOString() ?? null,
+          },
+          request.requestId,
+        ),
+      )
+    },
+  )
+
   // 2. Disconnect mailbox
   fastify.post(
     '/v1/capture/email/oauth/disconnect',

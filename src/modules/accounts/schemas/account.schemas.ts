@@ -34,6 +34,21 @@ const accountObject = {
     id: { type: 'string', format: 'uuid' },
     bankName: { type: 'string' },
     accountLast4: { type: 'string' },
+    // The bank's own masked number, when the account was discovered from an
+    // alert rather than typed. It is the better identifier of the two and for
+    // a discovered account it may be the ONLY one: Access reveals three
+    // digits, and padding those to a four-digit accountLast4 would invent one.
+    // Without this field such an account renders as "···· " with nothing after
+    // it, which is precisely the case discovery creates.
+    accountMask: { type: 'string', nullable: true },
+    // Who the bank addresses. Shown so a person can tell their own account
+    // from one that arrived in a shared or forwarded inbox.
+    holderName: { type: 'string', nullable: true },
+    // How the app came to believe this account is theirs. Stated in words on
+    // the client rather than implied by a tick, because "confirmed from a bank
+    // alert" and "somebody typed it" are different claims and only one of them
+    // is evidence.
+    verificationSource: { type: 'string', enum: ['SELF_DECLARED', 'EMAIL_DISCOVERY'] },
     accountType: { type: 'string', enum: ['CURRENT', 'SAVINGS', 'WALLET'] },
     captureMethod: { type: 'string', enum: ['EMAIL', 'MANUAL', 'SMS', 'MONO'] },
     gmailConnected: { type: 'boolean' },

@@ -34,6 +34,7 @@ function makeAccountRecord(overrides: Partial<AccountRecord> = {}): AccountRecor
     bankName: 'Guaranty Trust Bank',
     accountMask: null,
     holderName: null,
+    verificationSource: 'SELF_DECLARED' as const,
     accountLast4: '1234',
     accountType: 'CURRENT',
     captureMethod: 'MANUAL',
