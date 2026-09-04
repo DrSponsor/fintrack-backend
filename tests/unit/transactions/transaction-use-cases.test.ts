@@ -3,6 +3,7 @@ import {
   ListTransactionsUseCase,
   GetTransactionUseCase,
   CorrectCategoryUseCase,
+  CorrectDateUseCase,
   DeleteTransactionUseCase,
 } from '../../../src/modules/transactions/use-cases/transaction.use-cases'
 import type { ITransactionRepository, TransactionRecord } from '../../../src/modules/transactions/repositories/transaction.repo'
@@ -51,6 +52,7 @@ function createMockTransactionRepo(overrides: Partial<ITransactionRepository> = 
     findByProviderRef: vi.fn().mockResolvedValue([]),
     deleteManual: vi.fn().mockResolvedValue(undefined),
     // Resolves the count of backfilled rows, not undefined.
+    correctDate: vi.fn(),
     correctCategory: vi.fn().mockResolvedValue(0),
     ...overrides,
   }
@@ -307,5 +309,86 @@ describe('DeleteTransactionUseCase', () => {
       new DeleteTransactionUseCase({ transactionRepo, logger: silentLogger }).execute('user-1', tx.id),
     ).rejects.toThrow(AppError)
     expect(transactionRepo.deleteManual).not.toHaveBeenCalled()
+  })
+})
+
+describe('CorrectDateUseCase', () => {
+  const YESTERDAY = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+  function build(tx: ReturnType<typeof makeTransactionRecord>) {
+    const transactionRepo = createMockTransactionRepo({
+      findById: vi.fn().mockResolvedValue(tx),
+      correctDate: vi.fn().mockResolvedValue(tx),
+    })
+    return {
+      transactionRepo,
+      useCase: new CorrectDateUseCase({ transactionRepo, logger: silentLogger }),
+    }
+  }
+
+  it('moves a typed entry to when it actually happened', async () => {
+    const tx = makeTransactionRecord({ userId: 'user-1', source: 'MANUAL', isVerified: false })
+    const { transactionRepo, useCase } = build(tx)
+
+    await useCase.execute('user-1', tx.id, { transactionDate: YESTERDAY })
+
+    expect(transactionRepo.correctDate).toHaveBeenCalledWith(tx.id, new Date(YESTERDAY))
+  })
+
+  it('refuses to move a transaction that came from the bank', async () => {
+    // The bank's own statement about its own money. This app does not get to
+    // restate when it happened — the same rule delete already enforces.
+    const tx = makeTransactionRecord({ userId: 'user-1', source: 'EMAIL', isVerified: true })
+    const { transactionRepo, useCase } = build(tx)
+
+    await expect(useCase.execute('user-1', tx.id, { transactionDate: YESTERDAY })).rejects.toThrow(
+      AppError,
+    )
+    expect(transactionRepo.correctDate).not.toHaveBeenCalled()
+  })
+
+  it('refuses once a bank alert has confirmed the entry', async () => {
+    // A placeholder that has been superseded now carries the bank's timestamp,
+    // which is better evidence than anybody's recollection.
+    const tx = makeTransactionRecord({ userId: 'user-1', source: 'MANUAL', isVerified: true })
+    const { transactionRepo, useCase } = build(tx)
+
+    await expect(useCase.execute('user-1', tx.id, { transactionDate: YESTERDAY })).rejects.toThrow(
+      AppError,
+    )
+    expect(transactionRepo.correctDate).not.toHaveBeenCalled()
+  })
+
+  it('refuses a time in the future', async () => {
+    // Checked here as well as on the client, because the client is not the
+    // only way in — and a future row sorts above everything real forever.
+    const tx = makeTransactionRecord({ userId: 'user-1', source: 'MANUAL', isVerified: false })
+    const { transactionRepo, useCase } = build(tx)
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+
+    await expect(useCase.execute('user-1', tx.id, { transactionDate: tomorrow })).rejects.toThrow(
+      AppError,
+    )
+    expect(transactionRepo.correctDate).not.toHaveBeenCalled()
+  })
+
+  it('does not confirm that someone else’s transaction exists', async () => {
+    const tx = makeTransactionRecord({ userId: 'someone-else', source: 'MANUAL' })
+    const { transactionRepo, useCase } = build(tx)
+
+    await expect(useCase.execute('user-1', tx.id, { transactionDate: YESTERDAY })).rejects.toThrow(
+      AppError,
+    )
+    expect(transactionRepo.correctDate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a body that is not a date', async () => {
+    const tx = makeTransactionRecord({ userId: 'user-1', source: 'MANUAL', isVerified: false })
+    const { transactionRepo, useCase } = build(tx)
+
+    await expect(useCase.execute('user-1', tx.id, { transactionDate: 'yesterday' })).rejects.toThrow(
+      AppError,
+    )
+    expect(transactionRepo.correctDate).not.toHaveBeenCalled()
   })
 })

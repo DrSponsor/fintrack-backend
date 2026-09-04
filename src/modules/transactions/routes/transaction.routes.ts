@@ -3,6 +3,7 @@ import {
   ListTransactionsUseCase,
   GetTransactionUseCase,
   CorrectCategoryUseCase,
+  CorrectDateUseCase,
   DeleteTransactionUseCase,
 } from '../use-cases/transaction.use-cases'
 import { PrismaTransactionRepository } from '../repositories/transaction.repo'
@@ -16,6 +17,7 @@ import {
   listTransactionsJsonSchema,
   getTransactionJsonSchema,
   correctCategoryJsonSchema,
+  correctDateJsonSchema,
   deleteTransactionJsonSchema,
 } from '../schemas/transaction.schemas'
 
@@ -29,6 +31,11 @@ export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
   const deleteTransactionUseCase = new DeleteTransactionUseCase({ transactionRepo, logger: fastify.log })
   const consensus = new MerchantConsensusService({
     repo: new PrismaCategorizationRepository(fastify.db.primary),
+    logger: fastify.log,
+  })
+
+  const correctDateUseCase = new CorrectDateUseCase({
+    transactionRepo,
     logger: fastify.log,
   })
 
@@ -132,6 +139,25 @@ export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
           request.requestId,
         ),
       )
+    },
+  )
+
+  // ── PATCH /v1/transactions/:id/date ───────────────────────────────
+  fastify.patch(
+    '/v1/transactions/:id/date',
+    {
+      schema: correctDateJsonSchema,
+      preHandler: [authenticate],
+      config: {
+        audit: { action: 'correct_date', resourceType: 'transaction' },
+      },
+    },
+    async (request, reply) => {
+      const userId = requireUser(request).sub
+      const { id } = request.params as { id: string }
+      const moved = await correctDateUseCase.execute(userId, id, request.body)
+
+      return reply.code(200).send(successEnvelope(moved, request.requestId))
     },
   )
 }

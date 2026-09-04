@@ -195,3 +195,32 @@ export const deleteTransactionJsonSchema = {
     },
   },
 } as const
+
+export const correctDateBodySchema = z
+  .object({
+    transactionDate: z.string().datetime('Invalid transactionDate format'),
+  })
+  .strict()
+
+export const correctDateJsonSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['transactionDate'],
+    properties: {
+      transactionDate: { type: 'string', format: 'date-time' },
+    },
+  },
+  response: {
+    200: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['success', 'data', 'requestId'],
+      properties: {
+        success: { type: 'boolean', const: true },
+        data: transactionObject,
+        requestId: { type: 'string' },
+      },
+    },
+  },
+} as const

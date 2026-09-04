@@ -3,7 +3,11 @@ import type { ITransactionRepository, TransactionRecord, ListTransactionsFilter 
 import type { ICategoryRepository } from '../../categories/repositories/category.repo'
 import type { NormalizerService } from '../services/normalizer.service'
 import type { MerchantConsensusService } from '../services/merchant-consensus.service'
-import { listTransactionsQuerySchema, correctCategoryBodySchema } from '../schemas/transaction.schemas'
+import {
+  listTransactionsQuerySchema,
+  correctCategoryBodySchema,
+  correctDateBodySchema,
+} from '../schemas/transaction.schemas'
 import type { AppLogger } from '../../../core/logger'
 
 export type TransactionUseCasesDeps = {
@@ -215,5 +219,87 @@ export class CorrectCategoryUseCase {
     const transfers = await this.categoryRepo.findByName('transfers')
     if (transfers !== null && transfers.id === currentCategoryId) return 'transaction'
     return 'merchant'
+  }
+}
+
+/**
+ * Moving a typed entry to the moment it actually happened.
+ *
+ * ── Only what the user wrote ─────────────────────────────────────────────
+ * MANUAL rows only, and only while they are still unverified. A bank record
+ * is the bank’s statement about its own money and this app does not get to
+ * restate it — the same rule DeleteTransactionUseCase already enforces. Once
+ * an alert has superseded a placeholder, the bank’s timestamp is the better
+ * evidence and the typed one is gone for good reason.
+ *
+ * ── Why reconciliation is NOT re-run ─────────────────────────────────────
+ * Tempting: the row has moved, so it might now sit inside the window of a
+ * bank alert it previously missed. Running the matcher would mean an EDIT
+ * could conclude the row is a duplicate and remove it — the user corrects a
+ * time and the entry disappears, which is indefensible whatever the
+ * reconciliation logic decided.
+ *
+ * A visible duplicate the user can delete beats a row that vanished while
+ * they were fixing it.
+ *
+ * ── What moves silently, and is allowed to ───────────────────────────────
+ * The displayed balance. It counts entries dated after the bank’s last stated
+ * figure, so moving one across that line changes the total — correctly, and
+ * without announcing itself. That is the right behaviour: the balance is a
+ * derivation, and a derivation that did not follow its inputs would be the
+ * bug.
+ */
+export class CorrectDateUseCase {
+  private readonly transactionRepo: ITransactionRepository
+  private readonly logger: AppLogger
+
+  public constructor(deps: Pick<Required<TransactionUseCasesDeps>, 'transactionRepo' | 'logger'>) {
+    this.transactionRepo = deps.transactionRepo
+    this.logger = deps.logger
+  }
+
+  public async execute(userId: string, transactionId: string, rawBody: unknown): Promise<TransactionRecord> {
+    const parsed = correctDateBodySchema.safeParse(rawBody)
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0]
+      throw validationError(
+        firstIssue?.message ?? 'Validation failed',
+        firstIssue?.path[0] !== undefined ? String(firstIssue.path[0]) : undefined,
+      )
+    }
+
+    const at = new Date(parsed.data.transactionDate)
+
+    const transaction = await this.transactionRepo.findById(transactionId)
+    // 404 rather than 403 on an ownership mismatch, so the response does not
+    // confirm that somebody else’s transaction exists.
+    if (transaction === null || transaction.userId !== userId) {
+      throw notFound('Transaction not found')
+    }
+
+    if (transaction.source !== 'MANUAL') {
+      throw validationError(
+        'Only a transaction you recorded yourself can be moved. This one came from your bank.',
+      )
+    }
+
+    if (transaction.isVerified) {
+      throw validationError(
+        'Your bank has confirmed this payment, so its own date now applies.',
+      )
+    }
+
+    // A payment cannot have happened yet. Checked here as well as on the
+    // client because the client is not the only way in.
+    if (at.getTime() > Date.now()) {
+      throw validationError('That time is in the future.', 'transactionDate')
+    }
+
+    const moved = await this.transactionRepo.correctDate(transactionId, at)
+    this.logger.info(
+      { userId, transactionId, from: transaction.transactionDate.toISOString(), to: at.toISOString() },
+      'transaction date corrected',
+    )
+    return moved
   }
 }

@@ -132,6 +132,14 @@ export interface ITransactionRepository {
     fingerprint: string,
     scope: CorrectionScope,
   ): Promise<number>
+  /**
+   * Moves a typed entry to the moment it actually happened.
+   *
+   * Only the row itself is touched. Reconciliation is deliberately NOT re-run
+   * — see CorrectDateUseCase for why an edit must never be able to delete the
+   * row being edited.
+   */
+  correctDate(id: string, at: Date): Promise<TransactionRecord>
 }
 
 /** See correctCategoryBodySchema for why a correction has a reach at all. */
@@ -521,6 +529,70 @@ export class PrismaTransactionRepository implements ITransactionRepository {
       data: dataRows.map((row) => toDomain(row)),
       hasMore,
     }
+  }
+
+  /**
+   * Moves a typed entry to the moment it actually happened.
+   *
+   * ── One UPDATE, not a delete and re-insert ──────────────────────────
+   * transaction_date is half the primary key and the hypertable’s partition
+   * column, which normally means a row cannot move. TimescaleDB permits the
+   * update across chunks here — verified against this database rather than
+   * assumed — so the row keeps its id, and with it every correction the user
+   * has already made and every screen holding a reference to it.
+   *
+   * ── The children follow on their own ─────────────────────────────────
+   * transaction_events and budget_alerts both key on (transaction_id,
+   * transaction_date), so moving the parent would strand them. Both foreign
+   * keys are ON UPDATE CASCADE, so Postgres carries them across — also
+   * checked against the live constraints, because a silently broken audit
+   * chain is exactly the kind of damage nobody notices until it matters.
+   *
+   * ── The event is written at the NEW date ─────────────────────────────
+   * It has to be: by the time it is inserted the parent row already lives
+   * there, and an event at the old date would have nothing to point at.
+   */
+  public async correctDate(id: string, at: Date): Promise<TransactionRecord> {
+    const existing = await this.prisma.transaction.findFirst({
+      where: { id },
+      select: { transactionDate: true, source: true },
+    })
+    if (existing === null) {
+      throw new Error(`Transaction with id ${id} not found`)
+    }
+
+    const previousHash = await this.findLastEventHash(id)
+    const eventId = randomUUID()
+    const eventTimestamp = new Date()
+    const eventPayload = {
+      from: existing.transactionDate.toISOString(),
+      to: at.toISOString(),
+    }
+    const eventHash = sha256Hex(
+      `${eventId}:CORRECTED:${JSON.stringify(eventPayload)}:${eventTimestamp.toISOString()}:${previousHash}`,
+    )
+
+    const [txRow] = await this.prisma.$transaction([
+      this.prisma.transaction.update({
+        where: { id_transactionDate: { id, transactionDate: existing.transactionDate } },
+        data: { transactionDate: at },
+        select: SELECT_FIELDS,
+      }),
+      this.prisma.transactionEvent.create({
+        data: {
+          id: eventId,
+          transactionId: id,
+          transactionDate: at,
+          type: 'CORRECTED',
+          payload: eventPayload,
+          previousHash,
+          hash: eventHash,
+          createdAt: eventTimestamp,
+        },
+      }),
+    ])
+
+    return toDomain(txRow)
   }
 
   public async correctCategory(

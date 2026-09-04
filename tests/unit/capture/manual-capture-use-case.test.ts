@@ -91,6 +91,7 @@ function createMockTransactionRepo(overrides: Partial<ITransactionRepository> = 
     findByIdempotencyKey: vi.fn().mockResolvedValue(null),
     findByProviderRef: vi.fn().mockResolvedValue([]),
     deleteManual: vi.fn().mockResolvedValue(undefined),
+    correctDate: vi.fn(),
     correctCategory: vi.fn().mockResolvedValue(0),
     ...overrides,
   }
