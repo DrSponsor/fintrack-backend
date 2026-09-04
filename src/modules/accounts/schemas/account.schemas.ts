@@ -52,7 +52,7 @@ const accountObject = {
     accountType: { type: 'string', enum: ['CURRENT', 'SAVINGS', 'WALLET'] },
     captureMethod: { type: 'string', enum: ['EMAIL', 'MANUAL', 'SMS', 'MONO'] },
     gmailConnected: { type: 'boolean' },
-    balanceKobo: { type: 'string' },
+    balanceKobo: { type: 'string', nullable: true },
     adjustmentKobo: { type: 'string' },
     transactionCount: { type: 'integer' },
     lastTransactionDate: { type: 'string', format: 'date-time', nullable: true },

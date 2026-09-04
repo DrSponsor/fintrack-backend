@@ -18,7 +18,9 @@ export type AccountRecord = {
   readonly accountType: string
   readonly captureMethod: string
   readonly gmailConnected: boolean
-  readonly balanceKobo: string
+  /** What the bank itself last stated, or null if it never has. Never zero
+   *  standing in for unknown. */
+  readonly balanceKobo: string | null
   /** Net movement since the bank last stated the balance above. Kept apart
    *  from it because one is what a bank said and the other is what this app
    *  worked out, and a screen has to be able to tell a person which is which. */
@@ -105,7 +107,13 @@ function toDomain(row: PrismaAccountRow, adjustmentKobo = 0n, transactionCount =
     accountType: row.accountType,
     captureMethod: row.captureMethod,
     gmailConnected: row.gmailConnected,
-    balanceKobo: row.balanceKobo.toString(),
+    // Null when no bank has ever stated one, which is NOT the same as zero
+    // and must never be shown as it. The column defaults to 0 and is only
+    // written alongside lastTransactionDate, so a null anchor means the figure
+    // is untouched default rather than anybody's balance — and with the
+    // adjustment now applied on top, treating it as known would have shown a
+    // brand new account a confident negative balance.
+    balanceKobo: row.lastTransactionDate === null ? null : row.balanceKobo.toString(),
     adjustmentKobo: adjustmentKobo.toString(),
     transactionCount,
     lastTransactionDate: row.lastTransactionDate,
