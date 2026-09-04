@@ -378,11 +378,14 @@ export class PrismaTransactionRepository implements ITransactionRepository {
    * user's own category correction, a budget alert, a screen the client has
    * open — keeps working.
    *
-   * transactionDate is deliberately NOT updated. The table is a TimescaleDB
-   * hypertable partitioned on that column, so changing it would move the row
-   * between chunks and drag two ON UPDATE CASCADE foreign keys with it. The
-   * bank's exact timestamp is written into the audit event instead, where it is
-   * preserved without putting a partition key in motion.
+   * transactionDate is deliberately NOT updated. It is half the primary key,
+   * and two child tables cascade off it, so moving it is a heavier operation
+   * than a supersede needs — and the placeholder's date is close enough to
+   * the bank's that nothing is gained. The bank's exact timestamp is written
+   * into the audit event instead, where it is preserved without disturbing a
+   * key anything else points at.
+   *
+   * CorrectDateUseCase does move it, deliberately and with its own event.
    *
    * The prior values go into the same event, so a supersede that turns out to
    * have been wrong can be read back and undone.
@@ -535,11 +538,11 @@ export class PrismaTransactionRepository implements ITransactionRepository {
    * Moves a typed entry to the moment it actually happened.
    *
    * ── One UPDATE, not a delete and re-insert ──────────────────────────
-   * transaction_date is half the primary key and the hypertable’s partition
-   * column, which normally means a row cannot move. TimescaleDB permits the
-   * update across chunks here — verified against this database rather than
-   * assumed — so the row keeps its id, and with it every correction the user
-   * has already made and every screen holding a reference to it.
+   * transaction_date is half the primary key, so moving it rewrites part of
+   * that key rather than an ordinary column. Postgres allows it and the row
+   * keeps its id, and with it every correction the user has already made and
+   * every screen holding a reference to it — verified against a live database
+   * rather than assumed.
    *
    * ── The children follow on their own ─────────────────────────────────
    * transaction_events and budget_alerts both key on (transaction_id,

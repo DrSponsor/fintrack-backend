@@ -116,9 +116,11 @@ model Transaction {
   isVerified      Boolean         @default(false) @map("is_verified")
   /// The bank's own id for this transaction, when its alert states one. The
   /// only field that can settle whether two alerts describe the same payment
-  /// by equality rather than judgement. Not unique: TimescaleDB requires every
-  /// unique index to include the partition key, so uniqueness is enforced in
-  /// the application — see PrismaTransactionRepository.findByProviderRef.
+  /// by equality rather than judgement. Not unique, because a unique index
+  /// would have to include transaction_date to match the composite key, and
+  /// that permits the same reference on two different dates — exactly what it
+  /// exists to rule out. Uniqueness is enforced in the application instead;
+  /// see PrismaTransactionRepository.findByProviderRef.
   providerRef     String?         @map("provider_ref")
   /// Links the two sides of money moved between the user's own accounts.
   /// Both rows stay: each is a real alert from a different bank and each is

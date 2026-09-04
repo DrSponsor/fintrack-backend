@@ -1,5 +1,22 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-CREATE EXTENSION IF NOT EXISTS "timescaledb";
+
+-- timescaledb is deliberately NOT created here.
+--
+-- It used to be, and the transactions table was meant to become a hypertable
+-- partitioned on transaction_date. That conversion lives in the unnumbered
+-- create-hypertable.sql, which Prisma never runs, so it never happened: the
+-- extension was installed and zero hypertables existed.
+--
+-- What survives from that intent is real and worth keeping — the composite
+-- key (id, transaction_date), and the code that carries a date alongside an
+-- id when updating a row. Those cost nothing on plain Postgres and mean
+-- partitioning can be switched on later without touching application code.
+--
+-- What does not survive is the extension. It is unavailable on most managed
+-- Postgres, Supabase included, and this statement would fail there and take
+-- the whole migration with it. Nothing in this schema needs it: hypertables
+-- earn their keep at millions of rows, and native declarative partitioning
+-- covers the same ground without an extension if it is ever wanted.
 
 CREATE TYPE "Tier" AS ENUM ('FREE', 'PRO');
 CREATE TYPE "AccountType" AS ENUM ('CURRENT', 'SAVINGS', 'WALLET');

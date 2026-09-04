@@ -62,9 +62,8 @@ export class PrismaTransferRepository implements ITransferRepository {
    * of one — which would hide a single transaction from every total with
    * nothing to pair it against.
    *
-   * `transactionDate` is carried because it is half the primary key: the table
-   * is a TimescaleDB hypertable partitioned on it, so an update by id alone
-   * would scan every chunk.
+   * `transactionDate` is carried because it is half the primary key, so an
+   * update addressed by id alone cannot use the index and would scan.
    */
   public async linkAsTransfer(
     a: { readonly id: string; readonly transactionDate: Date },
