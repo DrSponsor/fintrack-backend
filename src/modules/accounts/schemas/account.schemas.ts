@@ -29,7 +29,7 @@ export type UpdateAccountBody = z.infer<typeof updateAccountBodySchema>
 const accountObject = {
   type: 'object',
   additionalProperties: false,
-  required: ['id', 'bankName', 'accountLast4', 'accountType', 'captureMethod', 'gmailConnected', 'balanceKobo'],
+  required: ['id', 'bankName', 'accountLast4', 'accountType', 'captureMethod', 'gmailConnected', 'balanceKobo', 'adjustmentKobo'],
   properties: {
     id: { type: 'string', format: 'uuid' },
     bankName: { type: 'string' },
@@ -53,6 +53,7 @@ const accountObject = {
     captureMethod: { type: 'string', enum: ['EMAIL', 'MANUAL', 'SMS', 'MONO'] },
     gmailConnected: { type: 'boolean' },
     balanceKobo: { type: 'string' },
+    adjustmentKobo: { type: 'string' },
     lastTransactionDate: { type: 'string', format: 'date-time', nullable: true },
   },
 } as const

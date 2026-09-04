@@ -19,6 +19,10 @@ export type AccountRecord = {
   readonly captureMethod: string
   readonly gmailConnected: boolean
   readonly balanceKobo: string
+  /** Net movement since the bank last stated the balance above. Kept apart
+   *  from it because one is what a bank said and the other is what this app
+   *  worked out, and a screen has to be able to tell a person which is which. */
+  readonly adjustmentKobo: string
   readonly lastTransactionDate: Date | null
 }
 
@@ -85,7 +89,7 @@ type PrismaAccountRow = {
   lastTransactionDate: Date | null
 }
 
-function toDomain(row: PrismaAccountRow): AccountRecord {
+function toDomain(row: PrismaAccountRow, adjustmentKobo = 0n): AccountRecord {
   return {
     id: row.id,
     userId: row.userId,
@@ -98,6 +102,7 @@ function toDomain(row: PrismaAccountRow): AccountRecord {
     captureMethod: row.captureMethod,
     gmailConnected: row.gmailConnected,
     balanceKobo: row.balanceKobo.toString(),
+    adjustmentKobo: adjustmentKobo.toString(),
     lastTransactionDate: row.lastTransactionDate,
   }
 }
@@ -131,7 +136,31 @@ export class PrismaAccountRepository implements IAccountRepository {
       orderBy: { bankName: 'asc' },
     })
 
-    return rows.map((row) => toDomain(row))
+    // What has moved since each bank last stated a figure. Grouped in one
+    // query rather than per account: this runs on every dashboard load, and a
+    // query per account turns a fast screen into N round trips as soon as
+    // somebody connects a second bank.
+    const movements = await this.prisma.transaction.groupBy({
+      by: ['accountId', 'type'],
+      where: {
+        OR: rows.map((row) => ({
+          accountId: row.id,
+          // A transaction ON the anchor is the anchor: the bank stated the
+          // balance AFTER it, so counting it again would double it.
+          transactionDate: { gt: row.lastTransactionDate ?? new Date(0) },
+        })),
+      },
+      _sum: { amountKobo: true },
+    })
+
+    const adjustments = new Map<string, bigint>()
+    for (const group of movements) {
+      const amount = group._sum.amountKobo ?? 0n
+      const signed = group.type === 'CREDIT' ? amount : -amount
+      adjustments.set(group.accountId, (adjustments.get(group.accountId) ?? 0n) + signed)
+    }
+
+    return rows.map((row) => toDomain(row, adjustments.get(row.id) ?? 0n))
   }
 
   public async findById(id: string): Promise<AccountRecord | null> {

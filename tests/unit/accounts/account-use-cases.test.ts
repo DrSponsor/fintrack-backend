@@ -38,6 +38,7 @@ function makeAccount(overrides: Partial<AccountRecord> = {}): AccountRecord {
     captureMethod: 'MANUAL',
     gmailConnected: false,
     balanceKobo: '0',
+    adjustmentKobo: '0',
     lastTransactionDate: null,
     ...overrides,
   }
