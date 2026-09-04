@@ -23,6 +23,10 @@ export type AccountRecord = {
    *  from it because one is what a bank said and the other is what this app
    *  worked out, and a screen has to be able to tell a person which is which. */
   readonly adjustmentKobo: string
+  /** How many transactions this account holds. Deleting it removes them all,
+   *  so the number belongs in the warning rather than a vague “cannot be
+   *  undone”. */
+  readonly transactionCount: number
   readonly lastTransactionDate: Date | null
 }
 
@@ -89,7 +93,7 @@ type PrismaAccountRow = {
   lastTransactionDate: Date | null
 }
 
-function toDomain(row: PrismaAccountRow, adjustmentKobo = 0n): AccountRecord {
+function toDomain(row: PrismaAccountRow, adjustmentKobo = 0n, transactionCount = 0): AccountRecord {
   return {
     id: row.id,
     userId: row.userId,
@@ -103,6 +107,7 @@ function toDomain(row: PrismaAccountRow, adjustmentKobo = 0n): AccountRecord {
     gmailConnected: row.gmailConnected,
     balanceKobo: row.balanceKobo.toString(),
     adjustmentKobo: adjustmentKobo.toString(),
+    transactionCount,
     lastTransactionDate: row.lastTransactionDate,
   }
 }
@@ -153,6 +158,17 @@ export class PrismaAccountRepository implements IAccountRepository {
       _sum: { amountKobo: true },
     })
 
+    // Everything the account holds, not just what is unaccounted for.
+    // Deleting an account cascades to its transactions, and a warning that
+    // says “this also removes 39 entries” is a decision someone can make;
+    // “this cannot be undone” is a phrase people click past.
+    const totals = await this.prisma.transaction.groupBy({
+      by: ['accountId'],
+      where: { accountId: { in: rows.map((row) => row.id) } },
+      _count: { _all: true },
+    })
+    const counts = new Map(totals.map((t) => [t.accountId, t._count._all]))
+
     const adjustments = new Map<string, bigint>()
     for (const group of movements) {
       const amount = group._sum.amountKobo ?? 0n
@@ -160,7 +176,7 @@ export class PrismaAccountRepository implements IAccountRepository {
       adjustments.set(group.accountId, (adjustments.get(group.accountId) ?? 0n) + signed)
     }
 
-    return rows.map((row) => toDomain(row, adjustments.get(row.id) ?? 0n))
+    return rows.map((row) => toDomain(row, adjustments.get(row.id) ?? 0n, counts.get(row.id) ?? 0))
   }
 
   public async findById(id: string): Promise<AccountRecord | null> {

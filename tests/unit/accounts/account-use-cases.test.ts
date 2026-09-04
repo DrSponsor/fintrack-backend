@@ -39,6 +39,7 @@ function makeAccount(overrides: Partial<AccountRecord> = {}): AccountRecord {
     gmailConnected: false,
     balanceKobo: '0',
     adjustmentKobo: '0',
+    transactionCount: 0,
     lastTransactionDate: null,
     ...overrides,
   }
