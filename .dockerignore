@@ -1,0 +1,12 @@
+# Nothing here belongs in a build context. node_modules in particular would be
+# copied over the ones installed for the target platform, and .env would put
+# real secrets into an image layer.
+node_modules
+.git
+.env
+.env.*
+dist
+coverage
+*.log
+.logs
+.backup
