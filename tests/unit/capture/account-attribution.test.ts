@@ -99,9 +99,9 @@ describe('attributeByMask', () => {
 })
 
 describe('an account discovered from an alert', () => {
-  // Discovery stores the bank's own masked number and may have no typed
-  // last-four at all, because Access reveals three digits and padding to four
-  // would invent one.
+  // Every account number here is invented. Discovery stores the bank's own
+  // masked number and may have no typed last-four at all, because Access
+  // reveals three digits and padding to four would invent one.
   const DISCOVERED: AttributableAccount = { id: 'discovered', accountMask: '012******345' }
 
   it('is recognised by the mask the bank printed', () => {
@@ -125,7 +125,7 @@ describe('an account discovered from an alert', () => {
   })
 
   it('matches a typed four-digit account against a three-digit reveal', () => {
-    const typed: AttributableAccount = { id: 'typed', accountLast4: '0257' }
+    const typed: AttributableAccount = { id: 'typed', accountLast4: '2345' }
     expect(attributeByMask('012******345', [typed]).kind).toBe('matched')
   })
 
@@ -133,7 +133,7 @@ describe('an account discovered from an alert', () => {
     // The comparison runs in whichever direction has more digits, so neither
     // side has to be the longer one.
     const discovered: AttributableAccount = { id: 'short', accountMask: '012******345' }
-    expect(attributeByMask('*****0257', [discovered]).kind).toBe('matched')
+    expect(attributeByMask('*****2345', [discovered]).kind).toBe('matched')
   })
 
   it('ignores an account carrying neither a mask nor enough digits', () => {

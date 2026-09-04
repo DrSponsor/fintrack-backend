@@ -291,11 +291,11 @@ describe('redactForDiscovery', () => {
   it('discloses the same amount whichever way the bank writes it', () => {
     // Both styles converge on three revealed digits, which is the point: the
     // model never sees more than a masking bank would have printed anyway.
-    const full = redactForDiscovery('0123456257').match(/(\d+)$/)?.[1]
+    const full = redactForDiscovery('0123452345').match(/(\d+)$/)?.[1]
     const masked = redactForDiscovery('012******345').match(/(\d+)$/)?.[1]
 
-    expect(full).toBe('257')
-    expect(masked).toBe('257')
+    expect(full).toBe('345')
+    expect(masked).toBe('345')
   })
 
   it('never lets a whole account number through', () => {
