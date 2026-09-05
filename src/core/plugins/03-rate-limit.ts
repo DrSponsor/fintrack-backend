@@ -38,7 +38,22 @@ export const rateLimitPlugin: AppFastifyPluginCallback = fp((fastify: AppFastify
 
     const now = Date.now()
     const userOrIp = request.user?.sub ?? request.ip
-    const localKey = `rate:${userOrIp}:${Math.floor(now / (windowSeconds * 1_000))}`
+    const bucket = Math.floor(now / (windowSeconds * 1_000))
+
+    // A route that sets its own limit gets its own counter.
+    //
+    // Previously every route shared one counter per caller while each applied
+    // its OWN limit to it, which is not a rate limit so much as a race: fifteen
+    // ordinary API calls left POST /v1/auth/refresh (max 20) with five before
+    // it started returning 429. A client that had been using the app — which is
+    // exactly the client whose token is about to expire — was therefore the
+    // most likely to be refused a refresh, and being refused a refresh means
+    // being signed out.
+    //
+    // The shared counter is kept as the default so the blanket per-caller
+    // ceiling still applies to everything that has not opted out.
+    const scope = routeConfig === undefined ? 'all' : (request.routeOptions?.url ?? request.url)
+    const localKey = `rate:${scope}:${userOrIp}:${bucket}`
 
     try {
       const redisAction = async (): Promise<number> => {

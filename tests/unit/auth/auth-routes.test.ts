@@ -10,6 +10,7 @@ import type { PrismaClient } from '../../../src/generated/prisma/client'
 import { hashPassword } from '../../../src/core/crypto/hashing'
 import { ERROR_CODES } from '../../../src/core/errors/codes'
 import { randomUUID } from 'node:crypto'
+import { signAccessToken } from '../../../src/core/crypto/tokens'
 
 // ──────────────────────────────────────────────────────────────────
 // Test infrastructure
@@ -346,5 +347,155 @@ describe('POST /v1/auth/google', () => {
     expect(response.json().error.code).toBe(ERROR_CODES.UNAUTHENTICATED)
 
     spyFetch.mockRestore()
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────
+// POST /v1/auth/refresh
+//
+// This endpoint had no test at all, and shipped broken because of it.
+//
+// It was mounted behind `authenticate`, so it demanded a valid access token —
+// while being the endpoint whose entire purpose is to replace an access token
+// that is no longer valid. Every session therefore ended fifteen minutes after
+// sign-in: the client 401'd, tried to refresh, was 401'd again for holding the
+// very token it was trying to replace, and logged the user out.
+//
+// Nothing above catches that, because every other test signs in and uses the
+// token immediately, which is the one condition under which the bug is
+// invisible. These tests exist to make the passage of time explicit.
+// ──────────────────────────────────────────────────────────────────
+describe('POST /v1/auth/refresh', () => {
+  async function signUp(email: string): Promise<{ accessToken: string; refreshToken: string }> {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/register',
+      payload: { email, password: 'SecureP@ss1' },
+    })
+    expect(response.statusCode).toBe(201)
+    const body = response.json()
+    return { accessToken: body.data.accessToken, refreshToken: body.data.refreshToken }
+  }
+
+  it('refreshes with no Authorization header at all', async () => {
+    const { refreshToken } = await signUp('refresh-plain@fintrack.ng')
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.data.accessToken).toBeTruthy()
+    expect(body.data.expiresIn).toBe(900)
+    // Rotating: the token that comes back must not be the one sent.
+    expect(body.data.refreshToken).not.toBe(refreshToken)
+  })
+
+  it('refreshes while holding an EXPIRED access token', async () => {
+    // The regression. A real client attaches its access token to every
+    // request, including this one — so the expired token travels with the
+    // refresh attempt. If the server rejects the request on account of it,
+    // the session can never be renewed and the user is signed out.
+    const { refreshToken } = await signUp('refresh-expired@fintrack.ng')
+
+    const expiredAccessToken = await signAccessToken(
+      {
+        sub: randomUUID(),
+        email: 'refresh-expired@fintrack.ng',
+        role: 'user',
+        tier: 'FREE',
+        sid: randomUUID(),
+      },
+      privateKey,
+      '-10 seconds',
+    )
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      headers: { authorization: `Bearer ${expiredAccessToken}` },
+      payload: { refreshToken },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().data.accessToken).toBeTruthy()
+  })
+
+  it('issues a token that still works after a further refresh', async () => {
+    // One rotation working proves little; a session lasts for many. This
+    // catches a rotation that returns a token it cannot itself consume.
+    const { refreshToken } = await signUp('refresh-chain@fintrack.ng')
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken },
+    })
+    expect(first.statusCode).toBe(200)
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken: first.json().data.refreshToken },
+    })
+    expect(second.statusCode).toBe(200)
+    expect(second.json().data.refreshToken).not.toBe(first.json().data.refreshToken)
+  })
+
+  it('rejects a refresh token that was already spent', async () => {
+    // Rotation is one-time use, and replaying a consumed token is the
+    // signature of a stolen one. Dropping `authenticate` from this route made
+    // the refresh token the sole credential, so this defence is now the whole
+    // of the endpoint's security and must be asserted, not assumed.
+    const { refreshToken } = await signUp('refresh-replay@fintrack.ng')
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken },
+    })
+    expect(first.statusCode).toBe(200)
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken },
+    })
+    expect(replay.statusCode).toBe(401)
+  })
+
+  it('rejects a token belonging to no session', async () => {
+    // Well-formed and correctly shaped, but never minted here. Parsing must
+    // not be mistaken for authenticating.
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken: `${randomUUID()}.${randomUUID()}.${'a'.repeat(64)}` },
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+
+  it('rejects a malformed refresh token', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken: 'not-a-refresh-token' },
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+
+  it('rejects a request with no refresh token', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(401)
   })
 })

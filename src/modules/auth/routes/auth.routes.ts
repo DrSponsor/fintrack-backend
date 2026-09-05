@@ -5,7 +5,7 @@ import { RefreshUseCase } from '../use-cases/refresh.use-case'
 import { LogoutUseCase } from '../use-cases/logout.use-case'
 import { GoogleAuthUseCase } from '../use-cases/google-auth.use-case'
 import { PrismaUserRepository } from '../repositories/user.repo'
-import { RedisSessionRepository } from '../repositories/session.repo'
+import { RedisSessionRepository, parseRefreshToken } from '../repositories/session.repo'
 import { authenticate } from '../../../core/middleware/authenticate'
 import { unauthenticated, validationError } from '../../../core/errors/factories'
 import { successEnvelope } from '../../../core/http/envelope'
@@ -142,14 +142,32 @@ export function registerAuthRoutes(fastify: AppFastifyInstance): void {
   //   1. httpOnly cookie (web clients)
   //   2. Request body `{ refreshToken }` (mobile clients — no cookie jar)
   // This is standard practice for multi-platform auth (Spotify, Revolut, etc.)
+  //
+  // Deliberately NOT behind `authenticate`.
+  //
+  // It used to be, and that made refreshing impossible: the 07-auth plugin
+  // rejects an expired bearer token for every route on the server, and an
+  // expired access token is the only reason this endpoint is ever called. The
+  // client would 401, call refresh with the same expired token, get 401 again,
+  // and log the user out — roughly fifteen minutes after they signed in.
+  //
+  // A refresh token is itself a bearer credential; requiring a second, shorter
+  // lived one alongside it bought nothing. What actually defends this endpoint
+  // is one-time-use rotation with reuse detection (see RedisSessionRepository)
+  // plus the rate limit below, which now matters because the route is
+  // reachable unauthenticated.
   fastify.post('/v1/auth/refresh', {
     schema: refreshJsonSchema,
-    preHandler: [authenticate],
+    config: {
+      // Higher than login's 20 because this key is now the IP for everyone —
+      // there is no authenticated user to key on — and Nigerian mobile
+      // carriers put very large numbers of subscribers behind one address.
+      // Guessing is not the threat this defends against in any case: a
+      // refresh token is 32 random bytes and is not reachable by brute force
+      // at any rate limit. This bounds abuse, nothing more.
+      rateLimit: { max: 60, window: 60 },
+    },
   }, async (request, reply) => {
-    if (request.user === undefined || request.user.sid === undefined) {
-      throw unauthenticated('Session identifier missing from token')
-    }
-
     // Try cookie first (web), fall back to body (mobile)
     const body = request.body as { refreshToken?: string } | undefined
     const refreshToken = request.cookies.refreshToken ?? body?.refreshToken
@@ -157,9 +175,17 @@ export function registerAuthRoutes(fastify: AppFastifyInstance): void {
       throw unauthenticated('Refresh token missing')
     }
 
+    // The token states which session it belongs to. Nothing is trusted on the
+    // strength of that alone — the hash comparison inside rotate() is what
+    // authenticates it; this only says which record to compare against.
+    const identity = parseRefreshToken(refreshToken)
+    if (identity === null) {
+      throw unauthenticated('Refresh token is malformed')
+    }
+
     const result = await refreshUseCase.execute(
-      request.user.sub,
-      request.user.sid,
+      identity.userId,
+      identity.sessionId,
       refreshToken,
     )
 

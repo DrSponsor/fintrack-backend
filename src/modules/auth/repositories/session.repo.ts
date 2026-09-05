@@ -27,6 +27,57 @@ export type CreateSessionResult = {
 /** Refresh token lifetime: 30 days in seconds */
 const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 
+/**
+ * A refresh token carries the identity it refreshes.
+ *
+ * It used to be 32 opaque random bytes, and the identity it belonged to was
+ * read from the ACCESS token on the refresh request instead — which meant
+ * POST /v1/auth/refresh required a valid access token. That is a circular
+ * requirement: the only reason to call refresh is that the access token has
+ * expired, so refreshing was impossible by construction and every session
+ * ended 15 minutes after sign-in.
+ *
+ * Making the token self-describing is what lets the endpoint drop its
+ * `authenticate` preHandler. The secret is still 32 random bytes and the
+ * stored hash still covers the whole string, so knowing the userId and
+ * sessionId — both already visible to anyone holding the token — gets an
+ * attacker no closer to forging one.
+ */
+function mintRefreshToken(userId: string, sessionId: string): string {
+  return `${userId}.${sessionId}.${randomBytes(32).toString('hex')}`
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SECRET_HEX_LENGTH = 64
+
+/**
+ * Reads the identity out of a refresh token, or null if it is not one.
+ *
+ * Null here means "not a token this server minted" — a truncated string, a
+ * token from before this format, or something invented. It is not proof of
+ * anything beyond that: the token still has to survive the hash comparison in
+ * `consume` before it authenticates anybody.
+ */
+export function parseRefreshToken(
+  token: string,
+): { readonly userId: string; readonly sessionId: string } | null {
+  const parts = token.split('.')
+  if (parts.length !== 3) {
+    return null
+  }
+  const [userId, sessionId, secret] = parts
+  if (userId === undefined || sessionId === undefined || secret === undefined) {
+    return null
+  }
+  if (!UUID_PATTERN.test(userId) || !UUID_PATTERN.test(sessionId)) {
+    return null
+  }
+  if (secret.length !== SECRET_HEX_LENGTH) {
+    return null
+  }
+  return { userId, sessionId }
+}
+
 /** Redis key prefix for individual sessions */
 function sessionKey(userId: string, sessionId: string): string {
   return `session:${userId}:${sessionId}`
@@ -91,7 +142,7 @@ export class RedisSessionRepository implements ISessionRepository {
 
   public async create(userId: string): Promise<CreateSessionResult> {
     const sessionId = randomUUID()
-    const refreshToken = randomBytes(32).toString('hex')
+    const refreshToken = mintRefreshToken(userId, sessionId)
     const refreshTokenHash = sha256Hex(refreshToken)
     const now = new Date()
     const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000)
@@ -158,7 +209,7 @@ export class RedisSessionRepository implements ISessionRepository {
       return null
     }
 
-    const newRefreshToken = randomBytes(32).toString('hex')
+    const newRefreshToken = mintRefreshToken(userId, sessionId)
     const newRefreshTokenHash = sha256Hex(newRefreshToken)
     const now = new Date()
     const expiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000)
