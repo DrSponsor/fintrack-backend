@@ -62,6 +62,25 @@ const envSchema = z.object({
     })
   }
 
+  // A key of all zeros is the placeholder .env.example used to ship, and it
+  // passed every check because it IS thirty-two valid bytes. So it was copied
+  // into a real .env and became the actual key protecting Gmail refresh
+  // tokens — a key with no entropy at all, which anybody can guess without
+  // ever seeing this repository.
+  //
+  // Rejected outright rather than warned about. A warning in a log nobody
+  // reads is how it survived in the first place, and the cost of refusing to
+  // boot is one command.
+  if (key.byteLength === 32 && key.every((byte) => byte === 0)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['FIELD_ENCRYPTION_KEY_BASE64'],
+      message:
+        'FIELD_ENCRYPTION_KEY_BASE64 is the all-zero placeholder and encrypts nothing. ' +
+        'Generate one: node -p "require(\x27crypto\x27).randomBytes(32).toString(\x27base64\x27)"',
+    })
+  }
+
   if (value.NODE_ENV === 'production') {
     if (!value.JWT_PUBLIC_KEY_PEM) {
       context.addIssue({

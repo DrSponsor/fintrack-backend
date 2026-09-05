@@ -9,7 +9,7 @@ const baseEnv = {
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/fintrack?pgbouncer=true',
   DIRECT_URL: 'postgresql://postgres:postgres@localhost:5432/fintrack',
   REDIS_URL: 'redis://localhost:6379',
-  FIELD_ENCRYPTION_KEY_BASE64: Buffer.alloc(32).toString('base64'),
+  FIELD_ENCRYPTION_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
 }
 
 describe('loadConfig', () => {
@@ -30,5 +30,15 @@ describe('loadConfig', () => {
   it('falls back read replica URL to the PgBouncer URL in local development', () => {
     const config = loadConfig(baseEnv)
     expect(config.readReplicaDatabaseUrl).toBe(baseEnv.DATABASE_URL)
+  })
+
+  it('refuses the all-zero placeholder key', () => {
+    // .env.example used to ship exactly this: thirty-two valid bytes, so every
+    // length check passed, and a comment asking you to replace it. It was
+    // copied into a real .env and became the live key protecting Gmail refresh
+    // tokens — a key anybody can guess without seeing the repository.
+    expect(() =>
+      loadConfig({ ...baseEnv, FIELD_ENCRYPTION_KEY_BASE64: Buffer.alloc(32).toString('base64') }),
+    ).toThrow()
   })
 })

@@ -15,7 +15,7 @@ export function createTestConfig(overrides: Partial<NodeJS.ProcessEnv> = {}): Ap
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/fintrack?pgbouncer=true',
     DIRECT_URL: 'postgresql://postgres:postgres@localhost:5432/fintrack',
     REDIS_URL: 'redis://localhost:6379',
-    FIELD_ENCRYPTION_KEY_BASE64: Buffer.alloc(32).toString('base64'),
+    FIELD_ENCRYPTION_KEY_BASE64: Buffer.alloc(32, 7).toString('base64'),
     ...overrides,
   })
 }
