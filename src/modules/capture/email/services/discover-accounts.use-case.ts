@@ -61,6 +61,18 @@ const ALERT_QUERY = [
   '"transaction notification"',
   '"account statement"',
   'subject:(debit OR credit OR transaction)',
+  // Found by WHO SENT IT, not only by what it says.
+  //
+  // Every clause above guesses at wording. That guess has now been wrong on a
+  // real inbox: a person receiving Opay alerts constantly scanned to nothing,
+  // and no phrase here is one we have ever confirmed against an actual Opay
+  // email — the hand-written Opay parser was deleted precisely because it
+  // failed all eleven real ones it was finally tested against.
+  //
+  // A sender is a fact rather than a guess. Matching loosely on the name means
+  // a bank is found even when it phrases its alert in a way nobody predicted,
+  // which is the failure mode this scan keeps hitting.
+  'from:(opay OR palmpay OR moniepoint OR kuda OR gtbank OR gtb OR accessbank OR zenithbank OR ubagroup OR firstbank OR stanbic OR fidelitybank OR unionbank OR wema OR alat OR sterling OR fcmb OR polaris OR ecobank OR keystone OR providus OR carbon OR fairmoney OR piggyvest OR cowrywise)',
 ].join(' OR ')
 
 export type DiscoverAccountsDeps = {
@@ -104,20 +116,46 @@ export class DiscoverAccountsUseCase {
       try {
         const email = await this.fetchService.fetchEmailWithBackoff(messageId, accessToken)
 
+        // Read the body ONCE, preferring HTML, and let every gate below judge
+        // the same text.
+        //
+        // `bodyText` is only populated when the message carries a text/plain
+        // MIME part. A sender that mails HTML alone — which is most banks, and
+        // every styled receipt — arrives with bodyText === ''. That was already
+        // known here: the model was given `bodyHtml || bodyText` precisely
+        // because Access sends an HTML table whose plain-text part is nearly
+        // empty. But the two filters above it still read `bodyText`, so for an
+        // HTML-only bank they ran against an empty string and the subject had
+        // to carry the decision by itself.
+        //
+        // Both directions of that were wrong. A real alert whose subject
+        // happens not to contain one of the twenty transaction keywords was
+        // dropped before the model ever saw it — the scan then reported "no
+        // accounts found" on a mailbox full of bank mail, with nothing logged
+        // to say an email had been discarded. And in the other direction, an
+        // HTML-only one-time-passcode email skipped BODY_DISCARD entirely,
+        // which is the check that exists to keep passcodes away from a
+        // third-party model.
+        const body = cleanText(email.bodyHtml || email.bodyText)
+
         // The safety gate applies here exactly as it does on ingest. A
         // one-time passcode is not a transaction alert, and it must not reach
         // a third-party model just because the flow it arrived in is new.
-        if (this.safetyFilter.shouldDiscard(email.subject, email.bodyText)) continue
-        if (!this.safetyFilter.hasTransactionKeywords(email.subject, email.bodyText)) continue
+        if (this.safetyFilter.shouldDiscard(email.subject, body)) continue
+        if (!this.safetyFilter.hasTransactionKeywords(email.subject, body)) {
+          // Logged, because the previous silence is what made this take three
+          // rounds of debugging on a real inbox: a discarded email and an
+          // inbox with no bank mail in it produced identical output.
+          this.logger.debug(
+            { messageId, senderDomain: email.senderDomain },
+            'discovery skipped a message with no transaction keywords',
+          )
+          continue
+        }
 
         sources.push({
           subject: email.subject,
-          // The SAME source the parsers read, for the same reason: Access sends
-          // its alert as an HTML table, and the plain-text part is nearly
-          // empty. Passing bodyText alone meant the model was handed a blank
-          // page for every Access email in the inbox — it found nothing and
-          // there was no error to notice, because nothing had gone wrong.
-          body: cleanText(email.bodyHtml || email.bodyText),
+          body,
           senderDomain: email.senderDomain,
         })
       } catch (err) {
@@ -187,7 +225,11 @@ export class DiscoverAccountsUseCase {
     // Filtering server-side also means the 40 fetches are spent on plausible
     // alerts rather than on mail that will be discarded locally, which is what
     // makes a bounded scan worth doing at all.
-    url.searchParams.set('q', `after:${yyyy}/${mm}/${dd} ${ALERT_QUERY}`)
+    // The OR group is PARENTHESISED. Gmail binds a space (AND) tighter than
+    // OR, so `after:D a OR b OR c` means `(after:D AND a) OR b OR c` — the date
+    // constrained only the first clause and every other one searched the whole
+    // mailbox. That silently spent the 40-message budget on mail of any age.
+    url.searchParams.set('q', `after:${yyyy}/${mm}/${dd} (${ALERT_QUERY})`)
     url.searchParams.set('maxResults', String(SCAN_MAX_MESSAGES))
 
     const response = await fetch(url.toString(), {

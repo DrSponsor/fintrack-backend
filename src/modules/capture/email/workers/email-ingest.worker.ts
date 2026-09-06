@@ -18,6 +18,7 @@ import type { NormalizerService } from '../../../transactions/services/normalize
 import type { CategorizerService } from '../../../transactions/services/categorizer.service'
 import { ReconciliationService } from '../../../transactions/services/reconciliation.service'
 import { attributeByMask } from '../services/account-attribution'
+import { cleanText } from '../parsers/utils'
 import type { TransferMatcherService } from '../../../transactions/services/transfer-matcher.service'
 import type { AppLogger } from '../../../../core/logger'
 import { jobId } from '../../../../core/queue/job-id'
@@ -281,14 +282,28 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
     }
 
     // 4. Run through the Safety Gate filters
-    if (this.safetyFilter.shouldDiscard(email.subject, email.bodyText)) {
+    //
+    // Judged on the HTML body where there is one. `bodyText` is populated only
+    // from a text/plain MIME part, so a bank that mails HTML alone — most of
+    // them — reached both gates below with an empty string, leaving the subject
+    // to decide by itself. A real alert whose subject lacked one of the twenty
+    // transaction keywords was dropped as DISCARDED_NO_KEYWORDS, and an
+    // HTML-only passcode email skipped the body half of the discard list
+    // entirely. The parsers below have always read `bodyHtml || bodyText`; the
+    // gate deciding whether they run should read what they read.
+    const gateBody = cleanText(email.bodyHtml || email.bodyText)
+
+    if (this.safetyFilter.shouldDiscard(email.subject, gateBody)) {
       this.logger.info({ messageId, subject: email.subject }, 'Email discarded by safety gate (OTP/security keyword)')
       await this.logEmailAccess(userId, null, messageId, email.senderDomain, email.subject, 'DISCARDED_SAFETY_FILTER')
       return
     }
 
-    if (!this.safetyFilter.hasTransactionKeywords(email.subject, email.bodyText)) {
-      this.logger.info({ messageId, subject: email.subject }, 'Email discarded silently (no transaction keywords found)')
+    if (!this.safetyFilter.hasTransactionKeywords(email.subject, gateBody)) {
+      this.logger.info(
+        { messageId, subject: email.subject, senderDomain: email.senderDomain },
+        'Email discarded silently (no transaction keywords found)',
+      )
       await this.logEmailAccess(userId, null, messageId, email.senderDomain, email.subject, 'DISCARDED_NO_KEYWORDS')
       return
     }
