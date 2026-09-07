@@ -5,7 +5,13 @@ import { decryptField, encryptField, decodeFieldEncryptionKey } from '../../../.
 import type { AppLogger } from '../../../../core/logger'
 import { AppError } from '../../../../core/errors/AppError'
 import { ERROR_CODES } from '../../../../core/errors/codes'
-import { tokenRevoked, validationError } from '../../../../core/errors/factories'
+import { tokenRevoked, validationError, forbidden } from '../../../../core/errors/factories'
+
+
+/** Asked for at consent, and REQUIRED afterwards — a person can untick it.
+ *  Declared once so the URL we send and the grant we verify cannot drift. */
+const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+const USERINFO_EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email'
 
 export type GmailTokenPayload = {
   readonly accessToken: string
@@ -56,7 +62,7 @@ export class OAuthService {
   public getConsentUrl(state: string): string {
     const clientId = this.config.googleClientId ?? ''
     const redirectUri = this.config.googleRedirectUri ?? ''
-    const scope = encodeURIComponent('https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email')
+    const scope = encodeURIComponent(`${GMAIL_READONLY_SCOPE} ${USERINFO_EMAIL_SCOPE}`)
     
     return `https://accounts.google.com/o/oauth2/v2/auth?` +
       `client_id=${encodeURIComponent(clientId)}&` +
@@ -103,11 +109,42 @@ export class OAuthService {
       readonly access_token?: string
       readonly refresh_token?: string
       readonly expires_in?: number
+      /** What Google ACTUALLY granted, which is not always what we asked for. */
+      readonly scope?: string
     }
 
     const accessToken = tokenJson.access_token
     if (!accessToken) {
       throw validationError('Google token exchange did not return an access token')
+    }
+
+    // Did they actually allow us to read the mail?
+    //
+    // Google's consent screen lists each requested permission with its own
+    // TICK BOX, and a person can approve the sign-in while leaving the Gmail
+    // box unticked. The exchange then succeeds — they did grant
+    // userinfo.email — and returns a perfectly valid token that cannot read a
+    // single message.
+    //
+    // Without this check that connection was saved and looked healthy. The
+    // failure only appeared later, as every Gmail call returning 403, which
+    // the discovery scan reported as "no bank accounts found in that inbox".
+    // The one explanation that is actually wrong: nothing is wrong with their
+    // inbox, and no amount of rescanning would ever have helped.
+    //
+    // Refused rather than stored, because a connection that cannot read mail
+    // has no use and its presence is what makes the real cause invisible. The
+    // remedy is to consent again with the box ticked, which the message says.
+    const granted = (tokenJson.scope ?? '').split(/\s+/).filter((entry) => entry.length > 0)
+    if (!granted.includes(GMAIL_READONLY_SCOPE)) {
+      this.logger.warn(
+        { userId, granted },
+        'Gmail connection refused: the read permission was not granted',
+      )
+      throw forbidden(
+        'FinTrack was not given permission to read this inbox. On the Google screen, ' +
+          'tick the box allowing FinTrack to read your email, then try connecting again.',
+      )
     }
 
     // Fetch user info to verify the email
