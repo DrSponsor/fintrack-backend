@@ -21,7 +21,10 @@ import type { AppLogger } from '../../../../core/logger'
 
 export type ConfirmedAccountInput = {
   readonly bankName: string
-  readonly accountMask: string
+  /** Null when the bank never printed the OWNER'S number — see
+   *  DiscoveredAccount.accountMask. Such an account is identified by bank and
+   *  holder, and receives alerts through attributeByBank. */
+  readonly accountMask: string | null
   readonly holderName: string | null
   readonly accountType: 'CURRENT' | 'SAVINGS' | 'WALLET'
 }
@@ -48,7 +51,7 @@ export class ConfirmAccountsUseCase {
 
     const existing = await this.prisma.account.findMany({
       where: { userId },
-      select: { id: true, accountMask: true, accountLast4: true },
+      select: { id: true, accountMask: true, accountLast4: true, bankName: true, holderName: true },
     })
 
     // The digits each existing account can be recognised by, so confirming
@@ -65,7 +68,52 @@ export class ConfirmAccountsUseCase {
     let created = 0
     let skipped = 0
 
+    // Accounts with no number of their own are deduplicated on bank and holder,
+    // since there is no tail to compare.
+    const knownIdentities = new Set<string>()
+    const flatten = (value: string): string => value.toLowerCase().replace(/s+/g, '')
+    for (const account of existing) {
+      if (account.holderName != null && account.holderName.length > 0) {
+        knownIdentities.add(`${flatten(account.bankName)}|${flatten(account.holderName)}`)
+      }
+    }
+
     for (const candidate of confirmed) {
+      // A wallet that never states the owner's account number. The account is
+      // still worth holding — it is how Opay alerts reach a home — but it is
+      // recognised by bank and holder rather than by digits.
+      if (candidate.accountMask === null) {
+        if (candidate.holderName === null || candidate.holderName.length === 0) {
+          throw validationError(
+            'An account with no number must state the account holder, or nothing identifies it.',
+            'holderName',
+          )
+        }
+
+        const identity = `${flatten(candidate.bankName)}|${flatten(candidate.holderName)}`
+        if (knownIdentities.has(identity)) {
+          skipped++
+          continue
+        }
+
+        await this.prisma.account.create({
+          data: {
+            userId,
+            bankName: candidate.bankName,
+            accountMask: null,
+            holderName: candidate.holderName,
+            accountType: candidate.accountType,
+            captureMethod: 'EMAIL',
+            verificationSource: 'EMAIL_DISCOVERY',
+            verifiedAt: new Date(),
+            accountLast4: null,
+          },
+        })
+        knownIdentities.add(identity)
+        created++
+        continue
+      }
+
       const tail = revealedTail(candidate.accountMask)
       if (tail === null) {
         // A candidate whose mask reveals nothing usable cannot later be matched

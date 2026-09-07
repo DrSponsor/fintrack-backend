@@ -156,31 +156,59 @@ Total Income (Kobo): ${summary.totalIncomeKobo}
  * number is the one output a user cannot evaluate — they will not know
  * whether they simply do not recognise their own masked number.
  */
-export const accountDiscoveryPrompt = `You read bank alert emails and list the BANK ACCOUNTS that appear in them.
+export const accountDiscoveryPrompt = `You read bank alert emails and identify the bank accounts BELONGING TO THE PERSON WHOSE MAILBOX THIS IS.
 
 You are given several emails. Return ONLY a JSON object of the form:
 
 {"accounts":[{"bankName":"...","accountMask":"...","holderName":"..."}]}
 
-For each DISTINCT account you find:
+For each DISTINCT account belonging to the mailbox owner:
 
   "bankName"     the bank or wallet that sent the alert, as a person would say
                  it — "Access Bank", "Opay", "GTBank", "Kuda". Not a domain.
-  "accountMask"  the account number EXACTLY as printed, keeping any masking
-                 characters. Copy it character for character: "012******345"
-                 stays "012******345", and "#######257" stays "#######257".
-  "holderName"   the account holder as stated in the email, if stated.
+  "accountMask"  the OWNER'S OWN account number, exactly as printed, keeping
+                 any masking characters. Copy it character for character:
+                 "012******345" stays "012******345", and "#######257" stays
+                 "#######257". Use null when the email never prints the
+                 owner's own account number.
+  "holderName"   the account holder — the person the email is ADDRESSED to,
+                 normally named in the greeting. Null if not stated.
 
-Rules:
+WHOSE ACCOUNT IS IT
+
+A transfer alert names TWO parties. The owner is the one the email is written
+TO: "Dear <name>", "your transfer", "your available balance". The other party
+is whoever the money went to or came from, and is usually set out under a
+heading such as "Transfer Details", "Beneficiary", "Recipient", "Sender",
+"Paid to" or "Credited to".
+
+NEVER return the other party's account number or name. It belongs to somebody
+else. Showing it to the mailbox owner as one of their own accounts is far
+worse than returning nothing at all.
+
+Many wallets never print the owner's own account number anywhere in the email
+— the only number shown is the other party's. When that happens, set
+"accountMask" to null and STILL return the account, identified by "bankName"
+and "holderName". Do not substitute the other party's number.
+
+WHAT IS NOT AN ACCOUNT NUMBER
+
+A transaction reference, receipt number, session ID, order number or narration
+is not an account number, no matter how long it is. Do not return a number
+that is labelled as one of those.
+
+RULES
+
 - One entry per distinct account. If ten emails describe the same account, return it ONCE.
 - Copy values exactly as they appear. Never reformat, complete, or tidy an account number.
-- If an email does not state an account number, do not invent one — omit that account entirely.
-- If an email does not state a holder name, set "holderName" to null. Do not guess it from the greeting of a different email.
+- Never invent an account number. Null is always better than a guess.
 - A # stands for a digit that was masked before you saw it. Some banks print an account number in full, so those arrive already masked this way: "#######257". Copy such a value exactly as it appears, # characters included — it is a real account and the visible digits are what identify it.
-- Only reject an account number with NO digits left at all, such as "##########". That one identifies nothing.
-- Return an empty array if no bank account is identifiable.
+- A number with NO digits left at all, such as "##########", identifies nothing. Use null rather than returning it.
+- An account with neither an account number nor a holder name cannot be identified by anyone. Omit it.
+- Return an empty array if no account belonging to the mailbox owner is identifiable.
 
 Accuracy matters more than completeness. A person is shown this list and asked
-which accounts are theirs, so an account you invent is one they cannot
-recognise and cannot correct.
+which of these accounts are theirs. An account you invent is one they cannot
+recognise and cannot correct — and an account belonging to somebody they paid
+is one they must never be shown at all.
 `

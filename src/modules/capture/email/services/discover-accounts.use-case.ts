@@ -182,14 +182,34 @@ export class DiscoverAccountsUseCase {
     // to the user as new.
     const existing = await this.accountRepo.findByUserId(userId)
     const known = new Set<string>()
+    // Accounts that have no number of their own are recognised by bank and
+    // holder instead — the Opay case, where the bank never prints the owner's
+    // account number and the only number in the email belongs to whoever they
+    // paid. Without this second set, such an account is offered again on every
+    // scan, because there is no tail to match it on.
+    const knownIdentities = new Set<string>()
+    const flatten = (value: string): string => value.toLowerCase().replace(/\s+/g, '')
+
     for (const account of existing) {
       const tail =
         (account.accountMask !== null ? revealedTail(account.accountMask) : null) ??
         account.accountLast4
       if (tail !== null && tail.length > 0) known.add(tail)
+      if (account.holderName !== null && account.holderName.length > 0) {
+        knownIdentities.add(`${flatten(account.bankName)}|${flatten(account.holderName)}`)
+      }
     }
 
     const offers = found.filter((candidate) => {
+      if (candidate.accountMask === null) {
+        // Nothing to match digits on. Offer it unless this person already has
+        // an account at that bank in that name.
+        if (candidate.holderName === null) return false
+        return !knownIdentities.has(
+          `${flatten(candidate.bankName)}|${flatten(candidate.holderName)}`,
+        )
+      }
+
       const tail = revealedTail(candidate.accountMask)
       if (tail === null) return true
       return ![...known].some((seen) =>

@@ -31,7 +31,9 @@ const confirmAccountsBodySchema = z.object({
     .array(
       z.object({
         bankName: z.string().min(1).max(100).trim(),
-        accountMask: z.string().min(1).max(64).trim(),
+        // Nullable: some wallets never print the owner's own account number.
+        // See ConfirmedAccountInput.
+        accountMask: z.string().min(1).max(64).trim().nullable().optional(),
         holderName: z.string().max(120).trim().nullable().optional(),
         accountType: z.enum(['CURRENT', 'SAVINGS', 'WALLET']),
       }),
@@ -453,10 +455,10 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
                 type: 'array',
                 items: {
                   type: 'object',
-                  required: ['bankName', 'accountMask'],
+                  required: ['bankName'],
                   properties: {
                     bankName: { type: 'string' },
-                    accountMask: { type: 'string' },
+                    accountMask: { type: 'string', nullable: true },
                     holderName: { type: 'string', nullable: true },
                   },
                 },
@@ -490,11 +492,11 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
               type: 'array',
               items: {
                 type: 'object',
-                required: ['bankName', 'accountMask', 'accountType'],
+                required: ['bankName', 'accountType'],
                 additionalProperties: false,
                 properties: {
                   bankName: { type: 'string', minLength: 1, maxLength: 100 },
-                  accountMask: { type: 'string', minLength: 1, maxLength: 64 },
+                  accountMask: { type: 'string', nullable: true, minLength: 1, maxLength: 64 },
                   holderName: { type: 'string', nullable: true, maxLength: 120 },
                   accountType: { type: 'string', enum: ['CURRENT', 'SAVINGS', 'WALLET'] },
                 },
@@ -515,7 +517,7 @@ export function registerEmailCaptureRoutes(fastify: AppFastifyInstance): void {
         requireUser(request).sub,
         body.data.accounts.map((a) => ({
           bankName: a.bankName,
-          accountMask: a.accountMask,
+          accountMask: a.accountMask ?? null,
           holderName: a.holderName ?? null,
           accountType: a.accountType,
         })),

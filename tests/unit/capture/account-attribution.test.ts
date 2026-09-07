@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   attributeByMask,
+  attributeByBank,
   revealedTail,
   MIN_REVEALED_DIGITS,
 } from '../../../src/modules/capture/email/services/account-attribution'
@@ -139,5 +140,58 @@ describe('an account discovered from an alert', () => {
   it('ignores an account carrying neither a mask nor enough digits', () => {
     const useless: AttributableAccount = { id: 'useless', accountLast4: '7' }
     expect(attributeByMask('012******345', [useless]).kind).toBe('unknown')
+  })
+})
+
+describe('attributeByBank', () => {
+  // A wallet that never prints the owner's own account number, so the account
+  // is held with no digits at all. Every name here is invented; none of these
+  // are real people or real accounts.
+  const WALLET: AttributableAccount = { id: 'wallet', bankName: 'Opay' }
+  const BANK: AttributableAccount = { id: 'bank', bankName: 'GTBank', accountLast4: '4471' }
+
+  it('attributes an alert to the only account held at the sending bank', () => {
+    const result = attributeByBank('opay-nigeria.com', [WALLET, BANK])
+
+    expect(result.kind).toBe('matched')
+    if (result.kind === 'matched') expect(result.accountId).toBe('wallet')
+  })
+
+  it('ignores punctuation between the bank name and the domain', () => {
+    expect(attributeByBank('gtbank.com', [WALLET, BANK]).kind).toBe('matched')
+  })
+
+  it('refuses to choose between two accounts at the same bank', () => {
+    // The domain names the bank, not which of its accounts. Guessing here is
+    // the silent misfiling the whole module exists to prevent.
+    const second: AttributableAccount = { id: 'wallet-2', bankName: 'Opay' }
+    const result = attributeByBank('opay-nigeria.com', [WALLET, second])
+
+    expect(result.kind).toBe('ambiguous')
+    if (result.kind === 'ambiguous') {
+      expect([...result.accountIds].sort()).toEqual(['wallet', 'wallet-2'])
+    }
+  })
+
+  it('has no opinion when no account is held at the sending bank', () => {
+    expect(attributeByBank('kudabank.com', [WALLET, BANK]).kind).toBe('no-opinion')
+  })
+
+  it('has no opinion rather than guessing when the name is not in the domain', () => {
+    // "United Bank for Africa" is nowhere inside "ubagroup.com". Answering for
+    // the banks it can and refusing for the rest is the point: a refusal
+    // leaves the caller exactly where it already was.
+    const uba: AttributableAccount = { id: 'uba', bankName: 'United Bank for Africa' }
+    expect(attributeByBank('ubagroup.com', [uba]).kind).toBe('no-opinion')
+  })
+
+  it('ignores an account with no bank name', () => {
+    const nameless: AttributableAccount = { id: 'nameless', accountLast4: '4471' }
+    expect(attributeByBank('opay-nigeria.com', [nameless]).kind).toBe('no-opinion')
+  })
+
+  it('has no opinion when the alert carried no sender domain', () => {
+    expect(attributeByBank('', [WALLET]).kind).toBe('no-opinion')
+    expect(attributeByBank('   ', [WALLET]).kind).toBe('no-opinion')
   })
 })

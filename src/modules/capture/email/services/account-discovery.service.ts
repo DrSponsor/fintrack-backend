@@ -57,7 +57,20 @@ export interface DiscoverySource {
 
 export interface DiscoveredAccount {
   readonly bankName: string
-  readonly accountMask: string
+  /**
+   * Null when the bank never printed the OWNER'S number.
+   *
+   * Opay is the case that forced this. Its transfer alert states the owner's
+   * name and balance, and the only account number anywhere in the email is the
+   * BENEFICIARY'S — the stranger the money was sent to. An account number was
+   * previously required, so the one number present was the one returned, and
+   * the owner would have been shown somebody else's bank account and asked
+   * whether it was theirs.
+   *
+   * Null is the honest answer for that shape of email. Such an account is
+   * identified by bankName and holderName instead.
+   */
+  readonly accountMask: string | null
   readonly holderName: string | null
 }
 
@@ -80,6 +93,14 @@ function shapeOf(mask: string): string {
  *  account written two ways is not offered twice. */
 function maskKey(mask: string): string {
   return mask.replace(/[\s\-]/g, '').replace(/[*x•·]/gi, '*').toLowerCase()
+}
+
+/** What identifies an account with no number of its own. Deliberately not the
+ *  holder name alone: the same person holds accounts at several banks, and two
+ *  people can share a name. */
+function identityKey(bankName: string, holderName: string): string {
+  const flatten = (value: string): string => value.toLowerCase().replace(/\s+/g, '')
+  return `${flatten(bankName)}|${flatten(holderName)}`
 }
 
 export class AccountDiscoveryService {
@@ -165,6 +186,25 @@ export class AccountDiscoveryService {
         reject(bankName.length === 0 ? 'no bank name' : 'bank name too long')
         continue
       }
+      // A number was offered: it still has to survive every check it always
+      // did. A number was NOT offered: that is now legitimate, and the holder
+      // name has to carry the identification instead.
+      const holderName = isPlausibleHolderName(holderRaw) ? holderRaw : null
+
+      if (accountMask.length === 0) {
+        if (holderName === null) {
+          reject('no account number and no usable holder name — identifies nobody')
+          continue
+        }
+
+        const identity = identityKey(bankName, holderName)
+        if (seen.has(identity)) continue
+        seen.add(identity)
+
+        out.push({ bankName, accountMask: null, holderName })
+        continue
+      }
+
       if (!isPlausibleAccountMask(accountMask)) {
         reject('mask is not plausible')
         continue
@@ -188,11 +228,7 @@ export class AccountDiscoveryService {
       if (seen.has(key)) continue
       seen.add(key)
 
-      out.push({
-        bankName,
-        accountMask,
-        holderName: isPlausibleHolderName(holderRaw) ? holderRaw : null,
-      })
+      out.push({ bankName, accountMask, holderName })
     }
 
     this.logger.info({ found: out.length, offered: list.length }, 'account discovery completed')

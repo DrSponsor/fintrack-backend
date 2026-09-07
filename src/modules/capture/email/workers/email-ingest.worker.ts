@@ -17,7 +17,7 @@ import type { DiscoveryService } from '../services/discovery.service'
 import type { NormalizerService } from '../../../transactions/services/normalizer.service'
 import type { CategorizerService } from '../../../transactions/services/categorizer.service'
 import { ReconciliationService } from '../../../transactions/services/reconciliation.service'
-import { attributeByMask } from '../services/account-attribution'
+import { attributeByMask, attributeByBank } from '../services/account-attribution'
 import { cleanText } from '../parsers/utils'
 import type { TransferMatcherService } from '../../../transactions/services/transfer-matcher.service'
 import type { AppLogger } from '../../../../core/logger'
@@ -380,6 +380,28 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
       // nothing else it could be, so this is a deduction rather than a guess.
       const only = owned[0]
       resolvedAccountId = only === undefined ? null : only.id
+    } else if (attribution.kind === 'no-opinion') {
+      // The alert named no account, and this person holds more than one. The
+      // rule above gives up here — correctly, when the alert really is
+      // ambiguous, and wrongly when it is not.
+      //
+      // Opay never prints the owner's account number: the only number in its
+      // transfer alert belongs to whoever was paid. So an Opay account is held
+      // with no digits to match on, and every Opay alert became unplaceable
+      // the moment the user added a second account anywhere.
+      //
+      // The sending domain still says which bank wrote. When exactly one of
+      // this person's accounts is held at that bank, that is a deduction of
+      // the same kind as the one above, not a guess. Two accounts at the same
+      // bank stay unplaceable, because the domain cannot separate them.
+      const byBank = attributeByBank(email.senderDomain, owned)
+      if (byBank.kind === 'matched') {
+        resolvedAccountId = byBank.accountId
+        this.logger.info(
+          { messageId, senderDomain: email.senderDomain, accountId: byBank.accountId },
+          'alert named no account; attributed by the bank that sent it',
+        )
+      }
     }
 
     if (resolvedAccountId === null) {

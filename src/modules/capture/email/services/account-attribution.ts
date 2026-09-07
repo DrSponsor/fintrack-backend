@@ -64,6 +64,69 @@ export type AttributableAccount = {
   readonly accountMask?: string | null
   /** The four digits the user typed, when they typed any. */
   readonly accountLast4?: string | null
+  /** The bank as the account records it — "Opay", "Access Bank". Used only by
+   *  `attributeByBank`, for accounts that have no digits to match on. */
+  readonly bankName?: string | null
+}
+
+/**
+ * Which account an alert is about when the alert names no account at all.
+ *
+ * ── Why this is needed ───────────────────────────────────────────────────
+ * Some wallets never print the owner's own account number. Opay's transfer
+ * alert states the owner's name and their balance, and the only account number
+ * in the whole email belongs to the person they PAID. So an Opay account is
+ * held with no digits of its own, and `attributeByMask` can only ever answer
+ * 'no-opinion' for it.
+ *
+ * The worker's existing fallback — "no opinion, and the user has exactly one
+ * account, so it must be that one" — covers a person with a single account and
+ * silently stops working the moment they add a second. Every Opay alert would
+ * then be dropped as unplaceable, which is the correct behaviour for an
+ * ambiguous alert and the wrong outcome for one that is not actually
+ * ambiguous: the sending domain says which bank it came from.
+ *
+ * ── Why the match is deliberately conservative ───────────────────────────
+ * Comparing a bank NAME to a sender DOMAIN is a heuristic, not a fact.
+ * "Opay" sits inside "opay-nigeria.com" and "GTBank" inside "gtbank.com", but
+ * "United Bank for Africa" is nowhere inside "ubagroup.com". So this answers
+ * for the banks it can and refuses for the rest, and refusing simply leaves
+ * the caller where it already was.
+ *
+ * Exactly one account must match. Two accounts at the same bank cannot be told
+ * apart by the bank's name, and guessing between them is precisely the silent
+ * misfiling this whole module exists to prevent.
+ */
+export function attributeByBank(
+  senderDomain: string,
+  accounts: readonly AttributableAccount[],
+): Attribution {
+  const domain = senderDomain.trim().toLowerCase()
+  if (domain.length === 0) {
+    return { kind: 'no-opinion', reason: 'the alert carried no sender domain' }
+  }
+
+  // The domain reduced to its letters, so "opay-nigeria.com" becomes
+  // "opaynigeriacom" and a bank name flattened the same way can be looked for
+  // inside it.
+  const haystack = domain.replace(/[^a-z]/g, '')
+
+  const matches = accounts.filter((account) => {
+    const name = account.bankName?.toLowerCase().replace(/[^a-z]/g, '') ?? ''
+    // Three letters is the shortest bank name worth matching on. Below that a
+    // substring test starts finding banks inside unrelated words.
+    if (name.length < 3) return false
+    return haystack.includes(name)
+  })
+
+  const only = matches[0]
+  if (only === undefined) {
+    return { kind: 'no-opinion', reason: 'no account is held at the bank that sent this alert' }
+  }
+  if (matches.length > 1) {
+    return { kind: 'ambiguous', accountIds: matches.map((account) => account.id) }
+  }
+  return { kind: 'matched', accountId: only.id }
 }
 
 /** The digits an account can be recognised by, whichever way it was created. */
