@@ -19,6 +19,7 @@ import {
   correctCategoryJsonSchema,
   correctDateJsonSchema,
   deleteTransactionJsonSchema,
+  listMerchantsJsonSchema,
 } from '../schemas/transaction.schemas'
 
 export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
@@ -70,6 +71,36 @@ export function registerTransactionRoutes(fastify: AppFastifyInstance): void {
           hasMore: result.hasMore,
         }),
       );
+    },
+  )
+
+  // ── GET /v1/transactions/merchants ────────────────────────────────
+  //
+  // Declared BEFORE /v1/transactions/:id. Fastify's router is not
+  // registration-ordered, so this is belt and braces rather than the thing
+  // that makes it work — but reading them in this order is what makes it
+  // obvious that "merchants" must never be parsed as an id.
+  fastify.get(
+    '/v1/transactions/merchants',
+    {
+      schema: listMerchantsJsonSchema,
+      preHandler: [authenticate],
+    },
+    async (request, reply) => {
+      const userId = requireUser(request).sub
+      const merchants = await transactionRepo.listMerchants(userId)
+
+      return reply.code(200).send(
+        successEnvelope(
+          merchants.map((merchant) => ({
+            merchantName: merchant.merchantName,
+            categoryId: merchant.categoryId,
+            uses: merchant.uses,
+            lastUsedAt: merchant.lastUsedAt.toISOString(),
+          })),
+          request.requestId,
+        ),
+      )
     },
   )
 

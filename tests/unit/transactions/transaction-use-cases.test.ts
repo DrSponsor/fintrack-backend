@@ -50,6 +50,7 @@ function createMockTransactionRepo(overrides: Partial<ITransactionRepository> = 
     supersede: vi.fn().mockResolvedValue(makeTransactionRecord()),
     findByIdempotencyKey: vi.fn().mockResolvedValue(null),
     findByProviderRef: vi.fn().mockResolvedValue([]),
+    listMerchants: vi.fn().mockResolvedValue([]),
     deleteManual: vi.fn().mockResolvedValue(undefined),
     // Resolves the count of backfilled rows, not undefined.
     correctDate: vi.fn(),

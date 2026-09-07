@@ -140,6 +140,29 @@ export interface ITransactionRepository {
    * row being edited.
    */
   correctDate(id: string, at: Date): Promise<TransactionRecord>
+  /**
+   * The merchants this person has recorded before, for typeahead on manual
+   * entry. Ordered by how often each was used, then by how recently.
+   */
+  listMerchants(userId: string, limit?: number): Promise<readonly MerchantSuggestion[]>
+}
+
+/**
+ * One merchant a person has used before, with the category it usually lands in.
+ *
+ * ── Why the category rides along ─────────────────────────────────────────
+ * So the form can offer it as a GUESS when the name is picked. It is a guess
+ * and is labelled as one on screen: the commonest past category is a good
+ * prediction and a bad certainty, and quietly filling a field is how a single
+ * old mistake propagates through every future entry unnoticed.
+ */
+export type MerchantSuggestion = {
+  readonly merchantName: string
+  /** The category this merchant most often landed in. Null when its uses are
+   *  split evenly, because there is no usual answer to offer. */
+  readonly categoryId: string | null
+  readonly uses: number
+  readonly lastUsedAt: Date
 }
 
 /** See correctCategoryBodySchema for why a correction has a reach at all. */
@@ -698,6 +721,80 @@ export class PrismaTransactionRepository implements ITransactionRepository {
     `
 
     return backfilled
+  }
+
+  /**
+   * Distinct merchants for one person, with their usual category.
+   *
+   * Grouped in the database rather than by reading every transaction back:
+   * a person with two years of history has thousands of rows and perhaps a
+   * hundred distinct merchants, and only the hundred are wanted.
+   *
+   * Grouped on (merchantName, categoryId) rather than on merchantName alone,
+   * which is what makes "the category it usually lands in" answerable — the
+   * pairs are folded below, per merchant, into the category with the most
+   * uses. A merchant with no clear winner reports null rather than an
+   * arbitrary one; see MerchantSuggestion.
+   */
+  public async listMerchants(userId: string, limit = 200): Promise<readonly MerchantSuggestion[]> {
+    const pairs = await this.prisma.transaction.groupBy({
+      by: ['merchantName', 'categoryId'],
+      where: { account: { userId } },
+      _count: { _all: true },
+      _max: { transactionDate: true },
+    })
+
+    const merged = new Map<
+      string,
+      { merchantName: string; uses: number; lastUsedAt: Date; best: { categoryId: string; uses: number } | null; tied: boolean }
+    >()
+
+    for (const pair of pairs) {
+      const name = pair.merchantName.trim()
+      if (name.length === 0) continue
+
+      const uses = pair._count._all
+      const at = pair._max.transactionDate ?? new Date(0)
+      // Case-insensitive, because the whole point of offering these back is to
+      // stop the same shop existing four times over. The first spelling seen
+      // wins as the label; every later variant folds into it.
+      const key = name.toLowerCase()
+
+      const existing = merged.get(key)
+      if (existing === undefined) {
+        merged.set(key, {
+          merchantName: name,
+          uses,
+          lastUsedAt: at,
+          best: { categoryId: pair.categoryId, uses },
+          tied: false,
+        })
+        continue
+      }
+
+      existing.uses += uses
+      if (at > existing.lastUsedAt) existing.lastUsedAt = at
+
+      if (existing.best === null || uses > existing.best.uses) {
+        existing.best = { categoryId: pair.categoryId, uses }
+        existing.tied = false
+      } else if (uses === existing.best.uses && pair.categoryId !== existing.best.categoryId) {
+        // Two categories used equally often. There is no usual answer, so none
+        // is offered — a coin toss presented as a prediction is worse than
+        // leaving the field alone.
+        existing.tied = true
+      }
+    }
+
+    return [...merged.values()]
+      .sort((a, b) => (b.uses - a.uses) || (b.lastUsedAt.getTime() - a.lastUsedAt.getTime()))
+      .slice(0, limit)
+      .map((entry) => ({
+        merchantName: entry.merchantName,
+        categoryId: entry.tied ? null : entry.best?.categoryId ?? null,
+        uses: entry.uses,
+        lastUsedAt: entry.lastUsedAt,
+      }))
   }
 
   private async findLastEventHash(transactionId: string): Promise<string> {

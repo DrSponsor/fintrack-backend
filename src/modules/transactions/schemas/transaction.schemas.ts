@@ -224,3 +224,36 @@ export const correctDateJsonSchema = {
     },
   },
 } as const
+
+/**
+ * The merchants a person has recorded before, for typeahead on manual entry.
+ *
+ * `categoryId` is nullable on purpose: it is the category this merchant
+ * usually lands in, and a merchant whose uses are split evenly between two
+ * categories has no usual answer. Null says "no guess" rather than offering a
+ * coin toss as a prediction.
+ */
+export const listMerchantsJsonSchema = {
+  response: {
+    200: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', const: true },
+        data: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['merchantName', 'uses', 'lastUsedAt'],
+            properties: {
+              merchantName: { type: 'string' },
+              categoryId: { type: 'string', nullable: true },
+              uses: { type: 'number' },
+              lastUsedAt: { type: 'string' },
+            },
+          },
+        },
+        requestId: { type: 'string' },
+      },
+    },
+  },
+} as const
