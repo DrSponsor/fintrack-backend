@@ -232,10 +232,37 @@ export class EmailIngestWorker extends BaseWorker<EmailIngestJobData, void> {
         null,
       )
 
+      // Resume from OUR cursor, not from the id the notification carried.
+      //
+      // Gmail's history.list returns records AFTER startHistoryId, and the id
+      // in a push notification is the mailbox's history id once the new message
+      // is already in it. Passing that straight through therefore asks Gmail
+      // for everything after the very message we were told about — so the
+      // message that triggered the sync is precisely the one excluded.
+      //
+      // GmailConnection.historyId exists for this, and its own comment says so
+      // — "a sync resumes rather than re-reading". saveHistoryId() was written
+      // and never called, so the cursor was set once at watch time and never
+      // advanced. Reading it is what closes the gap between notifications.
+      const startHistoryId = connection.historyId ?? historyId
+
       try {
-        await this.discoveryService.syncHistory(userId, historyId, accessToken, lastTxDate)
+        const latest = await this.discoveryService.syncHistory(
+          userId,
+          startHistoryId,
+          accessToken,
+          lastTxDate,
+        )
+
+        // Advance only on success. Throwing before this leaves the cursor where
+        // it was, so a failed sync is retried over the same window rather than
+        // skipped — the whole point of a cursor is that nothing is lost when a
+        // run dies halfway.
+        if (latest !== null) {
+          await this.connectionRepo.saveHistoryId(userId, latest)
+        }
       } catch (err) {
-        this.logger.error({ err, userId, historyId }, 'Error executing history sync')
+        this.logger.error({ err, userId, historyId, startHistoryId }, 'Error executing history sync')
         throw err
       }
       return
