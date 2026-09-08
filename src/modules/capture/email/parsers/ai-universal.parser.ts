@@ -43,17 +43,47 @@ export class AIUniversalParser {
       where: { senderDomain: normalizedDomain },
     })
 
-    if (patternRecord !== null) {
+    // A record with no patterns in it is not a pattern.
+    //
+    // prisma/seed.ts inserted the eight biggest Nigerian banks with
+    // `patterns: {}` and `status: 'STABLE'`, as placeholders. The row existing
+    // was enough to take this branch, so `parseWithPattern` was handed an empty
+    // object, returned null, and the generation path below was never reached —
+    // permanently. Every alert from Access, GTBank, Zenith, UBA, First Bank,
+    // Kuda, Moniepoint and Opay failed to parse, while unknown domains like
+    // substack.com and corel.com got working AI-generated parsers on first
+    // contact. The banks the app is FOR were the only senders it could not read.
+    //
+    // Treating an empty record as absent lets generation run and overwrite it,
+    // which self-heals the seeded rows on the next alert from each bank.
+    const storedPatterns =
+      patternRecord === null ? {} : (patternRecord.patterns as Record<string, string>)
+    const hasUsablePattern = Object.keys(storedPatterns).length > 0
+
+    if (patternRecord !== null && hasUsablePattern) {
       const isVerified = patternRecord.status === 'STABLE'
-      const patterns = patternRecord.patterns as Record<string, string>
-      const tx = this.parseWithPattern(text, patterns)
-      
+      const tx = this.parseWithPattern(text, storedPatterns)
+
+      // Reports what happened rather than that it was attempted. This said
+      // "Parsed email using existing AI-generated pattern" even when `tx` was
+      // null, so the logs asserted success at the exact moment of failure —
+      // and the line immediately after it in the worker said the parse had
+      // failed. Two contradictory statements about the same email.
       this.logger.info(
-        { senderDomain: normalizedDomain, isVerified, patternId: patternRecord.id },
-        'Parsed email using existing AI-generated pattern',
+        { senderDomain: normalizedDomain, isVerified, patternId: patternRecord.id, matched: tx !== null },
+        tx !== null
+          ? 'Parsed email using existing AI-generated pattern'
+          : 'Existing pattern did not match this email',
       )
-      
+
       return { tx, isVerified }
+    }
+
+    if (patternRecord !== null) {
+      this.logger.warn(
+        { senderDomain: normalizedDomain, patternId: patternRecord.id, status: patternRecord.status },
+        'Stored pattern is empty; regenerating as if none existed',
+      )
     }
 
     // 2. If no pattern exists, call IAIProvider.generateParserPattern under circuit breaker
@@ -97,8 +127,21 @@ export class AIUniversalParser {
     // If parsing succeeds (i.e. amount and merchant found), save to DB with status LEARNING
     if (tx !== null) {
       try {
-        await this.prisma.parserPattern.create({
-          data: {
+        // Upsert, not create.
+        //
+        // `create` throws on the unique senderDomain whenever a row already
+        // exists — which is exactly the case that now reaches here, since an
+        // empty seeded placeholder is treated as absent above. A generated
+        // pattern would have been discarded on save, every single time, and the
+        // bank would have stayed unreadable forever.
+        //
+        // The update deliberately overwrites the seeded row's STABLE status
+        // with LEARNING. STABLE on an empty pattern was a claim of the highest
+        // trust in the system on no evidence at all; a freshly generated
+        // pattern has earned exactly the trust of one email it could read.
+        await this.prisma.parserPattern.upsert({
+          where: { senderDomain: normalizedDomain },
+          create: {
             senderDomain: normalizedDomain,
             bankName: this.inferBankName(senderDomain),
             status: 'LEARNING',
@@ -106,6 +149,12 @@ export class AIUniversalParser {
             aiGenerated: true,
             confirmedByUsers: 0,
             version: 1,
+            lastValidated: new Date(),
+          },
+          update: {
+            status: 'LEARNING',
+            patterns: screened,
+            aiGenerated: true,
             lastValidated: new Date(),
           },
         })
