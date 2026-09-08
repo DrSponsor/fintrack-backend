@@ -44,6 +44,11 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional().or(z.literal('')),
   GOOGLE_REDIRECT_URI: z.string().optional().or(z.literal('')),
   GOOGLE_PUB_SUB_TOPIC: z.string().default('projects/fintrack-prod/topics/gmail-push'),
+  // An explicit enum rather than z.coerce.boolean(), which maps the STRING
+  // "false" to true — every non-empty string is truthy. A flag that silently
+  // means the opposite of what the variable says is the worst kind to have on
+  // the switch that decides whether anything gets processed at all.
+  RUN_WORKERS: z.enum(['true', 'false']).default('false'),
   PAYSTACK_SECRET_KEY: z.string().optional().or(z.literal('')),
   PAYSTACK_PLAN_PRO_MONTHLY: z.string().optional().or(z.literal('')),
   PAYSTACK_PLAN_PRO_ANNUAL: z.string().optional().or(z.literal('')),
@@ -171,6 +176,19 @@ const envSchema = z.object({
 
 export type AppConfig = {
   readonly nodeEnv: z.infer<typeof nodeEnvSchema>
+  /**
+   * Whether THIS process consumes the BullMQ queues.
+   *
+   * The queues had no consumer in production at all. `runWorkers` defaults to
+   * false in buildApp, worker.ts was the only caller setting it true, and the
+   * Dockerfile runs dist/server.js — so a Gmail push was enqueued and then sat
+   * in Redis forever. No email has ever produced a transaction.
+   *
+   * Setting this on the API service runs both in one process, which is right
+   * while volume is small. Splitting later needs no code change: unset it here
+   * and give a second service dist/worker.js, which sets the flag itself.
+   */
+  readonly runWorkers: boolean
   readonly host: string
   readonly port: number
   readonly logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent'
@@ -229,6 +247,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(parsed.GOOGLE_CLIENT_SECRET ? { googleClientSecret: parsed.GOOGLE_CLIENT_SECRET } : {}),
     ...(parsed.GOOGLE_REDIRECT_URI ? { googleRedirectUri: parsed.GOOGLE_REDIRECT_URI } : {}),
     googlePubSubTopic: parsed.GOOGLE_PUB_SUB_TOPIC,
+    runWorkers: parsed.RUN_WORKERS === 'true',
     paystackSecretKey: parsed.PAYSTACK_SECRET_KEY || 'ts_paystack_secret_key_fallback',
     paystackPlanProMonthly: parsed.PAYSTACK_PLAN_PRO_MONTHLY || 'PLN_test_monthly',
     paystackPlanProAnnual: parsed.PAYSTACK_PLAN_PRO_ANNUAL || 'PLN_test_annual',
